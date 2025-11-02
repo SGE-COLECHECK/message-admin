@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>WhatsApp API - QR</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        input { padding: 5px; margin-bottom: 10px; }
+        button { padding: 10px; margin-right: 10px; cursor: pointer; }
+        #qrImage { max-width: 300px; margin-top: 20px; border: 1px solid #ccc; }
+        #output { background: #f0f0f0; padding: 10px; margin-top: 20px; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>WhatsApp API - Test QR</h1>
+
+    <div>
+        <label for="sessionName">Nombre de la sesión:</label>
+        <input type="text" id="sessionName" value="default">
+    </div>
+    
+    <div>
+        <button onclick="createSession()">1. Obtener QR</button>
+        <button onclick="checkStatus()">2. Verificar Estado</button>
+        <button onclick="logout()">3. Cerrar Sesión</button>
+    </div>
+
+    <!-- Aquí se mostrará el QR -->
+    <img id="qrImage" src="" alt="Código QR" style="display: none;">
+
+    <!-- Aquí se mostrarán los mensajes de la API -->
+    <pre id="output"></pre>
+
+    <script>
+        const qrImage = document.getElementById('qrImage');
+        const output = document.getElementById('output');
+        const sessionInput = document.getElementById('sessionName');
+
+        function log(data) {
+            output.textContent = JSON.stringify(data, null, 2);
+        }
+
+        function getSessionName() {
+            return sessionInput.value.trim() || 'default';
+        }
+
+        async function createSession() {
+            log('Enviando petición para crear sesión...');
+            qrImage.style.display = 'none'; // Ocultar QR anterior
+
+            const sessionName = getSessionName();
+            try {
+                const response = await fetch('/whatsapp/sessions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: sessionName })
+                });
+                const data = await response.json();
+                log(data);
+
+                // <-- LA MAGIA: Si la respuesta tiene un QR, mostrarlo
+                if (response.ok && data.qrCode) {
+                    qrImage.src = data.qrCode;
+                    qrImage.style.display = 'block';
+                    log('✅ QR generado. Escanea la imagen de arriba.');
+                } else {
+                    log('⚠️ No se pudo generar el QR. Revisa el mensaje de error o verifica el estado.');
+                }
+
+            } catch (error) {
+                log({ error: 'Error de conexión', details: error.message });
+            }
+        }
+
+        async function checkStatus() {
+            log('Verificando estado...');
+            const sessionName = getSessionName();
+            try {
+                const response = await fetch(`/whatsapp/sessions/${sessionName}/qr`);
+                const data = await response.json();
+                log(data);
+
+                if (response.ok && data.isAuthenticated) {
+                    log('✅ Sesión ya está autenticada. No necesitas escanear.');
+                }
+            } catch (error) {
+                log({ error: 'Error de conexión', details: error.message });
+            }
+        }
+
+        async function logout() {
+            log('Cerrando sesión...');
+            qrImage.style.display = 'none';
+            const sessionName = getSessionName();
+            try {
+                const response = await fetch(`/whatsapp/sessions/${sessionName}/logout`, { method: 'POST' });
+                const data = await response.json();
+                log(data);
+            } catch (error) {
+                log({ error: 'Error de conexión', details: error.message });
+            }
+        }
+
+        // Verificar estado al cargar la página
+        window.onload = checkStatus;
+    </script>
+</body>
+</html>
