@@ -1,3 +1,7 @@
+# ===============================
+# Node / NestJS Project Ignore
+# ===============================
+
 # Node dependencies
 node_modules/
 
@@ -38,21 +42,40 @@ test-results/
 temp/
 .cache/
 
-# Profiles (WhatsApp / Puppeteer sessions)
+# ===============================
+# WhatsApp / Puppeteer Profiles
+# ===============================
 profiles/
+profiles/**
 
-# Local screenshots or debug images
+# ===============================
+# Screenshots / Debug Images
+# ===============================
+# (No subas capturas de errores, depuración, pasos, etc.)
 *.png
 *.jpg
 *.jpeg
 
-# Keep public/index.html (do NOT ignore this)
+# Ejemplos específicos (por si ya existen en cache)
+antes-de-enviar.png
+auth-failed-screenshot.png
+debug-whatsapp.png
+error-no-messagebox.png
+error-whatsapp.png
+paso-3-resultados-busqueda.png
+paso-4-chat-abierto.png
+paso-6-mensaje-insertado.png
+
+# ===============================
+# Public folder (keep index.html)
+# ===============================
 !public/
 !public/index.html
-
-# Optional: ignore generated JS maps or bundles inside public
 public/*.js
 public/*.map
 
-# Package manager lockfile (optional)
+# ===============================
+# Package Manager Lockfile
+# ===============================
+# (opcional: comenta si quieres mantenerlo)
 # package-lock.json
