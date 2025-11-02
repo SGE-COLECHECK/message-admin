@@ -1,56 +1,58 @@
-# compiled output
-/dist
-/node_modules
-/build
+# Node dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# TypeScript
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
 
 # Logs
-logs
+logs/
 *.log
-npm-debug.log*
-pnpm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-lerna-debug.log*
+*.log.*
+log/
+debug.log
+error.log
 
-# OS
+# OS / Editor junk
 .DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
 
 # Tests
-/coverage
-/.nyc_output
+coverage/
+test-results/
 
-# IDEs and editors
-/.idea
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
+# Temporary files
+.tmp/
+temp/
+.cache/
 
-# IDE - VSCode
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+# Profiles (WhatsApp / Puppeteer sessions)
+profiles/
 
-# dotenv environment variable files
-.env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
+# Local screenshots or debug images
+*.png
+*.jpg
+*.jpeg
 
-# temp directory
-.temp
-.tmp
+# Keep public/index.html (do NOT ignore this)
+!public/
+!public/index.html
 
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
+# Optional: ignore generated JS maps or bundles inside public
+public/*.js
+public/*.map
 
-# Diagnostic reports (https://nodejs.org/api/report.html)
-report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+# Package manager lockfile (optional)
+# package-lock.json
