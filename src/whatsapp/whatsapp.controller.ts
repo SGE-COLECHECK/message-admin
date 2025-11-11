@@ -3,7 +3,6 @@ import { SessionManagerService } from './services/session-manager.service';
 import { AuthService } from './services/auth.service';
 import { ScraperService } from './services/scraper.service';
 import { QueueService } from './services/queue.service';
-import { StatsService } from './services/stats.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { SendAssistanceDto } from './dto/send-assistance.dto';
 import { Session } from './interfaces/session.interface';

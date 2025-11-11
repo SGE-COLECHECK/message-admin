@@ -17,6 +17,7 @@ export class BrowserService {
     this.logger.log(`🚀 Iniciando navegador para la sesión '${sessionName}' con perfil en ${profilePath}`);
     const browser = await puppeteer.launch({
       headless: false,
+      //headless: true,
       userDataDir: profilePath,
       args: [
         '--no-sandbox',

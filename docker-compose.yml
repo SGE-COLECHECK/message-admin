@@ -1,6 +1,44 @@
-version: '3.8'
-
+# Define los servicios que componen tu aplicación
 services:
+  # Servicio de tu aplicación de WhatsApp
+  app:
+    build: . # Construye la imagen usando el Dockerfile de esta carpeta
+    container_name: whatsapp_app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      # Variables de entorno para tu aplicación
+      - NODE_ENV=production
+      # ¡IMPORTANTE! Dentro de Docker, el host de Redis es el nombre del servicio
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      # Puedes añadir las otras variables de tu .env aquí si lo prefieres
+      - QUEUE_RETRY_ATTEMPTS=3
+      - QUEUE_RETRY_DELAY=5000
+      - QUEUE_PROCESSING_INTERVAL=1000
+    
+      - PUPPETEER_WAIT_FOR_UI_TIMEOUT=5000
+      - PUPPETEER_TYPING_DELAY=50
+      - PUPPETEER_AFTER_CLICK_DELAY=150
+    volumes:
+      # Volumen para persistir las sesiones de WhatsApp (¡muy importante!)
+      - ./profiles:/app/profiles
+      # Volumen para las sesiones de wwebjs (si tu librería lo usa)
+      - ./wwebjs_auth:/app/.wwebjs_auth
+      # Volumen para servir tus archivos estáticos (como index.html)
+      - ./public:/app/public
+      # Sincroniza la hora del contenedor con la del host
+      - /etc/localtime:/etc/localtime:ro
+    # Añade más memoria compartida, que Chrome necesita para no crashear
+    shm_size: 1gb
+    # Asegura de que Redis esté listo antes de iniciar la aplicación
+    depends_on:
+      - redis
+
+  # Servicio de la base de datos Redis
   redis:
     image: redis:7-alpine
     container_name: whatsapp_redis_queue
@@ -16,6 +54,7 @@ services:
       timeout: 3s
       retries: 5
 
+# Define el volumen persistente para Redis
 volumes:
   redis_data:
     driver: local
