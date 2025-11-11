@@ -250,12 +250,23 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     
     const parsedItems: QueueItem[] = items.map(item => JSON.parse(item));
     
+    // ✅ Calcular tiempo estimado (aprox 5-8 segundos por mensaje)
+    const avgTimePerMessage = 6.5; // segundos
+    const pendingCount = parsedItems.filter(i => i.status === 'pending').length;
+    const estimatedTimeSeconds = pendingCount * avgTimePerMessage;
+    const estimatedMinutes = Math.ceil(estimatedTimeSeconds / 60);
+    
     return {
       sessionName,
       total: parsedItems.length,
-      pending: parsedItems.filter(i => i.status === 'pending').length,
+      pending: pendingCount,
       processing: parsedItems.filter(i => i.status === 'processing').length,
       isProcessing: this.processing.get(sessionName) || false,
+      estimatedTime: {
+        seconds: Math.round(estimatedTimeSeconds),
+        minutes: estimatedMinutes,
+        formatted: estimatedMinutes < 1 ? 'Menos de 1 minuto' : `~${estimatedMinutes} min`
+      },
       items: parsedItems.map(i => ({
         id: i.id,
         phoneNumber: i.phoneNumber,

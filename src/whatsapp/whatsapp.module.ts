@@ -5,6 +5,7 @@ import { AuthService } from './services/auth.service';
 import { ScraperService } from './services/scraper.service';
 import { SessionManagerService } from './services/session-manager.service';
 import { QueueService } from './services/queue.service';
+import { StatsService } from './services/stats.service';
 
 @Module({
   controllers: [WhatsappController],
@@ -14,6 +15,7 @@ import { QueueService } from './services/queue.service';
     ScraperService,
     SessionManagerService,
     QueueService,
+    StatsService,
   ],
 })
 export class WhatsappModule {}
