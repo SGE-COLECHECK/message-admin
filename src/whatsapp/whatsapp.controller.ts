@@ -1,8 +1,8 @@
-import { Controller, Get, Post, Body, Param, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { SessionManagerService } from './services/session-manager.service';
 import { AuthService } from './services/auth.service';
 import { ScraperService } from './services/scraper.service';
-import { QueueService } from './services/queue.service'; // ✅ Agregar
+import { QueueService } from './services/queue.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { SendAssistanceDto } from './dto/send-assistance.dto';
 import { Session } from './interfaces/session.interface';
@@ -15,7 +15,7 @@ export class WhatsappController {
     private readonly sessionManager: SessionManagerService,
     private readonly authService: AuthService,
     private readonly scraperService: ScraperService,
-    private readonly queueService: QueueService, // ✅ Agregar
+    private readonly queueService: QueueService,
   ) {}
 
   @Post('sessions')
@@ -114,16 +114,16 @@ export class WhatsappController {
       throw new HttpException('Sesión no encontrada o no autenticada.', HttpStatus.BAD_REQUEST);
     }
     
-    // ✅ Ahora devuelve el queueId
-    const queueId = await this.scraperService.sendAssistanceReport(session.page, reportData, name);
+    const queueId = await this.scraperService.sendAssistanceReport(reportData, name);
     
     return { 
       success: true, 
-      message: 'Mensaje agregado a la cola',
+      message: 'Mensaje agregado a la cola de Redis',
       queueId 
     };
   }
   
+  // ✅ ENDPOINTS DE COLA
   @Get('queues')
   async getAllQueuesStatus() {
     return this.queueService.getAllQueuesStatus();
@@ -134,10 +134,27 @@ export class WhatsappController {
     return this.queueService.getQueueStatus(name);
   }
 
+  @Delete('queues/:name')
+  async clearQueue(@Param('name') name: string) {
+    await this.queueService.clearQueue(name);
+    return { message: `Cola '${name}' limpiada` };
+  }
+
+  @Get('queues/:name/errors')
+  async getQueueErrors(@Param('name') name: string) {
+    const errors = await this.queueService.getErrors(name);
+    return {
+      sessionName: name,
+      totalErrors: errors.length,
+      errors
+    };
+  }
+
   @Post('sessions/:name/logout')
   async logout(@Param('name') name: string) {
     await this.authService.closeBrowserForSession(name);
     this.sessionManager.remove(name);
-    return { message: `Sesión '${name}' cerrada.` };
+    await this.queueService.clearQueue(name);
+    return { message: `Sesión '${name}' cerrada y cola limpiada.` };
   }
 }

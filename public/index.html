@@ -2,42 +2,268 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>WhatsApp API - QR</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp API - QR & Queue</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; }
-        input { padding: 5px; margin-bottom: 10px; }
-        button { padding: 10px; margin-right: 10px; cursor: pointer; }
-        #qrImage { max-width: 300px; margin-top: 20px; border: 1px solid #ccc; }
-        #output { background: #f0f0f0; padding: 10px; margin-top: 20px; white-space: pre-wrap; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            padding: 30px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        
+        .session-input-group {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #555;
+        }
+        
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border 0.3s;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 30px;
+        }
+        
+        button {
+            flex: 1;
+            min-width: 150px;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-info {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            color: white;
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+        }
+        
+        #qrImage {
+            max-width: 300px;
+            margin: 20px auto;
+            border: 3px solid #667eea;
+            border-radius: 15px;
+            display: none;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .qr-container {
+            text-align: center;
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 15px;
+            margin: 20px 0;
+        }
+        
+        .qr-status {
+            font-size: 18px;
+            font-weight: 600;
+            color: #667eea;
+            margin-top: 15px;
+        }
+        
+        #output {
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 20px;
+            margin-top: 20px;
+            white-space: pre-wrap;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            max-height: 400px;
+            overflow-y: auto;
+            box-shadow: inset 0 2px 10px rgba(0,0,0,0.5);
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        
+        .status-authenticated {
+            background: #4caf50;
+            color: white;
+        }
+        
+        .status-waiting {
+            background: #ff9800;
+            color: white;
+        }
+        
+        .queue-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+        
+        .queue-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .stat-number {
+            font-size: 32px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
-    <h1>WhatsApp API - Test QR</h1>
+    <div class="container">
+        <h1>🚀 WhatsApp API Dashboard</h1>
+        <p class="subtitle">Sistema de gestión de sesiones y colas con Redis</p>
 
-    <div>
-        <label for="sessionName">Nombre de la sesión:</label>
-        <input type="text" id="sessionName" value="default">
+        <div class="session-input-group">
+            <label for="sessionName">📝 Nombre de la sesión:</label>
+            <input type="text" id="sessionName" value="default" placeholder="Ingresa el nombre de tu sesión">
+        </div>
+        
+        <div class="button-group">
+            <button class="btn-primary" onclick="createSession()">🔐 Obtener QR</button>
+            <button class="btn-info" onclick="checkStatus()">🔍 Verificar Estado</button>
+            <button class="btn-secondary" onclick="checkQueue()">📊 Ver Cola</button>
+            <button class="btn-danger" onclick="logout()">🚪 Cerrar Sesión</button>
+        </div>
+
+        <div class="qr-container" id="qrContainer" style="display: none;">
+            <h3>📱 Escanea el código QR</h3>
+            <img id="qrImage" src="" alt="Código QR">
+            <div class="qr-status" id="qrStatus"></div>
+        </div>
+
+        <div class="queue-section" id="queueSection" style="display: none;">
+            <h3>📊 Estado de la Cola</h3>
+            <div class="queue-stats" id="queueStats"></div>
+        </div>
+
+        <pre id="output">Esperando comandos...</pre>
     </div>
-    
-    <div>
-        <button onclick="createSession()">1. Obtener QR</button>
-        <button onclick="checkStatus()">2. Verificar Estado</button>
-        <button onclick="logout()">3. Cerrar Sesión</button>
-    </div>
-
-    <!-- Aquí se mostrará el QR -->
-    <img id="qrImage" src="" alt="Código QR" style="display: none;">
-
-    <!-- Aquí se mostrarán los mensajes de la API -->
-    <pre id="output"></pre>
 
     <script>
         const qrImage = document.getElementById('qrImage');
+        const qrContainer = document.getElementById('qrContainer');
+        const qrStatus = document.getElementById('qrStatus');
+        const queueSection = document.getElementById('queueSection');
+        const queueStats = document.getElementById('queueStats');
         const output = document.getElementById('output');
         const sessionInput = document.getElementById('sessionName');
 
-        function log(data) {
-            output.textContent = JSON.stringify(data, null, 2);
+        let autoRefreshInterval = null;
+
+        function log(data, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const prefix = type === 'error' ? '❌ ERROR' : type === 'success' ? '✅ SUCCESS' : 'ℹ️ INFO';
+            output.textContent = `[${timestamp}] ${prefix}\n${JSON.stringify(data, null, 2)}`;
         }
 
         function getSessionName() {
@@ -45,8 +271,9 @@
         }
 
         async function createSession() {
-            log('Enviando petición para crear sesión...');
-            qrImage.style.display = 'none'; // Ocultar QR anterior
+            log('🔄 Enviando petición para crear sesión...');
+            qrContainer.style.display = 'none';
+            queueSection.style.display = 'none';
 
             const sessionName = getSessionName();
             try {
@@ -56,53 +283,139 @@
                     body: JSON.stringify({ name: sessionName })
                 });
                 const data = await response.json();
-                log(data);
 
-                // <-- LA MAGIA: Si la respuesta tiene un QR, mostrarlo
                 if (response.ok && data.qrCode) {
                     qrImage.src = data.qrCode;
                     qrImage.style.display = 'block';
-                    log('✅ QR generado. Escanea la imagen de arriba.');
+                    qrContainer.style.display = 'block';
+                    qrStatus.innerHTML = '⏳ Esperando escaneo... <span class="loading"></span>';
+                    log(data, 'success');
+                    
+                    // Auto-verificar cada 3 segundos
+                    startAutoRefresh();
+                } else if (response.ok && data.isAuthenticated) {
+                    log(data, 'success');
+                    qrStatus.innerHTML = '<span class="status-authenticated">✅ Ya autenticado</span>';
                 } else {
-                    log('⚠️ No se pudo generar el QR. Revisa el mensaje de error o verifica el estado.');
+                    log(data, 'error');
                 }
 
             } catch (error) {
-                log({ error: 'Error de conexión', details: error.message });
+                log({ error: 'Error de conexión', details: error.message }, 'error');
             }
         }
 
         async function checkStatus() {
-            log('Verificando estado...');
+            log('🔍 Verificando estado de la sesión...');
             const sessionName = getSessionName();
             try {
                 const response = await fetch(`/whatsapp/sessions/${sessionName}/qr`);
                 const data = await response.json();
-                log(data);
+                log(data, 'info');
 
                 if (response.ok && data.isAuthenticated) {
-                    log('✅ Sesión ya está autenticada. No necesitas escanear.');
+                    qrContainer.style.display = 'block';
+                    qrImage.style.display = 'none';
+                    qrStatus.innerHTML = '<span class="status-authenticated">✅ Sesión autenticada correctamente</span>';
+                    stopAutoRefresh();
+                } else if (response.ok && data.qrCode) {
+                    qrImage.src = data.qrCode;
+                    qrImage.style.display = 'block';
+                    qrContainer.style.display = 'block';
+                    qrStatus.innerHTML = '<span class="status-waiting">⏳ Esperando autenticación...</span>';
                 }
             } catch (error) {
-                log({ error: 'Error de conexión', details: error.message });
+                log({ error: 'Error de conexión', details: error.message }, 'error');
+            }
+        }
+
+        async function checkQueue() {
+            log('📊 Consultando estado de la cola...');
+            const sessionName = getSessionName();
+            try {
+                const response = await fetch(`/whatsapp/queues/${sessionName}`);
+                const data = await response.json();
+                log(data, 'info');
+
+                queueSection.style.display = 'block';
+                queueStats.innerHTML = `
+                    <div class="stat-card">
+                        <div class="stat-number">${data.total || 0}</div>
+                        <div class="stat-label">Total</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">${data.pending || 0}</div>
+                        <div class="stat-label">Pendientes</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">${data.processing || 0}</div>
+                        <div class="stat-label">Procesando</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">${data.isProcessing ? '🟢' : '🔴'}</div>
+                        <div class="stat-label">Estado</div>
+                    </div>
+                `;
+            } catch (error) {
+                log({ error: 'Error de conexión', details: error.message }, 'error');
             }
         }
 
         async function logout() {
-            log('Cerrando sesión...');
-            qrImage.style.display = 'none';
+            if (!confirm('¿Estás seguro de cerrar la sesión y limpiar la cola?')) return;
+            
+            log('🚪 Cerrando sesión...');
+            qrContainer.style.display = 'none';
+            queueSection.style.display = 'none';
+            stopAutoRefresh();
+            
             const sessionName = getSessionName();
             try {
                 const response = await fetch(`/whatsapp/sessions/${sessionName}/logout`, { method: 'POST' });
                 const data = await response.json();
-                log(data);
+                log(data, 'success');
             } catch (error) {
-                log({ error: 'Error de conexión', details: error.message });
+                log({ error: 'Error de conexión', details: error.message }, 'error');
             }
         }
 
-        // Verificar estado al cargar la página
-        window.onload = checkStatus;
+        function startAutoRefresh() {
+            stopAutoRefresh();
+            autoRefreshInterval = setInterval(async () => {
+                const sessionName = getSessionName();
+                try {
+                    const response = await fetch(`/whatsapp/sessions/${sessionName}/qr`);
+                    const data = await response.json();
+                    
+                    if (data.isAuthenticated) {
+                        qrStatus.innerHTML = '<span class="status-authenticated">✅ Autenticación completada!</span>';
+                        qrImage.style.display = 'none';
+                        stopAutoRefresh();
+                        log(data, 'success');
+                    }
+                } catch (error) {
+                    console.error('Error auto-refresh:', error);
+                }
+            }, 3000);
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+        }
+
+        // Verificar estado al cargar
+        window.onload = () => {
+            checkStatus();
+            checkQueue();
+        };
+
+        // Limpiar al cerrar
+        window.onbeforeunload = () => {
+            stopAutoRefresh();
+        };
     </script>
 </body>
 </html>
