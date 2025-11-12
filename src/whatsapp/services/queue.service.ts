@@ -71,7 +71,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     this.processingInterval = setInterval(() => this.processAllQueues(), interval);
     this.logger.log(`🔄 Procesamiento de colas iniciado (cada ${interval}ms)`);
     this.logger.log(`📊 Configuración: Typing=${this.typingDelay}ms, AfterClick=${this.afterClickDelay}ms, UITimeout=${this.uiTimeout}ms`);
-
+    
     // Diagnosticar conexión a Redis (sin esperar, para no bloquear)
     this.diagnosisRedisConnection().catch(err => {
       this.logger.error('Error en diagnóstico de Redis:', err);
@@ -90,11 +90,11 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     try {
       const pong = await this.redisClient.ping();
       this.logger.log(`✅ Conexión a Redis confirmada: ${pong}`);
-
+      
       // Verificar si hay colas pendientes
       const keys = await this.redisClient.keys('queue:*');
       this.logger.log(`📋 Colas existentes en Redis: ${keys.length} sesión(es)`);
-
+      
       for (const key of keys) {
         const length = await this.redisClient.llen(key);
         this.logger.log(`   - ${key}: ${length} mensaje(s)`);
@@ -128,7 +128,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     };
 
     const queueKey = this.getQueueKey(sessionName);
-
+    
     try {
       await this.redisClient.rpush(queueKey, JSON.stringify(item));
       this.logger.log(`📥 [QUEUE] Mensaje agregado a cola '${sessionName}': ${id} (${phoneNumber})`);
@@ -157,11 +157,11 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         const session = this.sessionManager.get(sessionName);
         if (!session) {
           this.logger.warn(`⚠️  [QUEUE] Sesión '${sessionName}' no existe en memoria. Limpiando cola...`);
-
+          
           // Limpiar la cola de Redis para esta sesión
           const queueLength = await this.redisClient.llen(queueKey);
           this.logger.warn(`   └─ Deletando ${queueLength} mensaje(s) huérfano(s)`);
-
+          
           await this.redisClient.del(queueKey);
           continue;
         }
@@ -218,25 +218,42 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
             await this.statsService.incrementDailyCounter(item.sessionName);
 
           } catch (error) {
-            item.retryCount++;
-
-            if (item.retryCount >= this.maxRetries) {
+            // >>>>> INICIO DE LA MODIFICACIÓN CLAVE <<<<<
+            
+            // Si el error es porque el número no tiene WhatsApp, fallar inmediatamente sin reintentar.
+            if (error.name === 'NoWhatsAppError') {
               item.status = 'failed';
               item.error = error.message;
-              this.logger.error(`❌ [QUEUE] Falló permanentemente: ${item.id} (${this.maxRetries} intentos)`);
+              this.logger.error(`🚫 [QUEUE] Número sin WhatsApp. Fallado sin reintentos: ${item.id}`);
               this.logger.error(`   └─ Error: ${error.message}`);
 
               await this.redisClient.lpop(queueKey);
               await this.saveToErrors(item);
             } else {
-              item.status = 'pending';
-              this.logger.warn(`⚠️  [QUEUE] Reintentando: ${item.id} (intento ${item.retryCount}/${this.maxRetries})`);
-              this.logger.warn(`   └─ Error: ${error.message}`);
+              // Para cualquier otro error, aplicar la lógica de reintentos normal.
+              item.retryCount++;
 
-              await this.redisClient.lpop(queueKey);
-              await this.redisClient.rpush(queueKey, JSON.stringify(item));
-              await this.sleep(this.retryDelay);
+              if (item.retryCount >= this.maxRetries) {
+                item.status = 'failed';
+                item.error = error.message;
+                this.logger.error(`❌ [QUEUE] Falló permanentemente: ${item.id} (${this.maxRetries} intentos)`);
+                this.logger.error(`   └─ Error: ${error.message}`);
+
+                await this.redisClient.lpop(queueKey);
+                await this.saveToErrors(item);
+              } else {
+                item.status = 'pending';
+                this.logger.warn(`⚠️  [QUEUE] Reintentando: ${item.id} (intento ${item.retryCount}/${this.maxRetries})`);
+                this.logger.warn(`   └─ Error: ${error.message}`);
+
+                await this.redisClient.lpop(queueKey);
+                await this.redisClient.rpush(queueKey, JSON.stringify(item));
+                await this.sleep(this.retryDelay);
+              }
             }
+            
+            // >>>>> FIN DE LA MODIFICACIÓN CLAVE <<<<<
+
           } finally {
             this.processing.set(sessionName, false);
           }
@@ -270,7 +287,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     await this.sendMessageViaPuppeteer(session.page, item.phoneNumber, item.message);
   }
 
-  private async sendMessageViaPuppeteer(page: Page, phoneNumber: string, message: string): Promise<void> {
+private async sendMessageViaPuppeteer(page: Page, phoneNumber: string, message: string): Promise<void> {
     let formattedPhone = phoneNumber.replace(/[\s\-\(\)]/g, '');
     if (!formattedPhone.startsWith('51')) {
       formattedPhone = '51' + formattedPhone;
@@ -298,29 +315,52 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       // --- PASO 3: ESCRIBIR EL NÚMERO DE TELÉFONO ---
       this.logger.log(`[PASO 3] Escribiendo el número: ${formattedPhone}`);
       await page.type('div[contenteditable="true"][data-tab="3"]', formattedPhone, { delay: this.typingDelay });
-      await this.sleep(2500); // Más tiempo para que la lista se renderice
+      await this.sleep(1300); // Más tiempo para que la lista se renderice
 
       // --- PASO 4: VERIFICAR QUE EL CONTACTO APAREZCA ---
       this.logger.log(`[PASO 4] Verificando si el contacto aparece en la lista...`);
+      
+      // NUEVA VERIFICACIÓN: Detectar si WhatsApp indica que no hay resultados
+      const noResultsFound = await page.evaluate(() => {
+        const text = document.body.innerText;
+        return text.includes('No se encontró ningún chat, contacto ni mensaje') ||
+               text.includes('No se encontraron') || 
+               text.includes('No results') ||
+               text.includes('Ningún resultado') ||
+               text.includes('No chats') ||
+               text.includes('Sin resultados') ||
+               text.includes('Este número no está registrado en WhatsApp'); // Mensaje específico para números sin WhatsApp
+      });
+
+      // Si se detecta que no hay resultados, lanzar error inmediatamente
+      if (noResultsFound) {
+        this.logger.error(`❌ WhatsApp mostró "no encontrado" para ${formattedPhone}`);
+        const error = new Error(`NO_WHATSAPP:${formattedPhone}`);
+        error.name = 'NoWhatsAppError';
+        throw error;
+      }
+      
       const contactAppeared = await page.evaluate(() => {
         const contactElement = document.querySelector('._2auQ3') as HTMLElement;
         return contactElement && contactElement.offsetParent !== null;
       });
 
       if (!contactAppeared) {
-        // ✅ NO CONTINUAR - El número no tiene WhatsApp
-        throw new Error(`❌ El número ${formattedPhone} NO tiene WhatsApp o no existe. Saltando al siguiente mensaje.`);
+        this.logger.warn(`⚠️  El contacto NO apareció en la lista (${formattedPhone}). Intentando con Enter...`);
+        // Fallback: presionar Enter si el contacto no aparece
+        await page.keyboard.press('Enter');
+      } else {
+        this.logger.log(`[PASO 4] ✅ Contacto encontrado. Haciendo clic en él...`);
+        // Hacer clic en el contacto EN VEZ DE presionar Enter
+        await page.click('._2auQ3');
       }
 
-      // ✅ Si llegó aquí, el contacto SÍ existe
-      this.logger.log(`[PASO 4] ✅ Contacto encontrado. Haciendo clic en él...`);
-      await page.click('._2auQ3');
-      await this.sleep(3000);
+      await this.sleep(1500); // Esperar a que el chat cargue completamente
 
       // --- PASO 5: ENCONTRAR EL CUADRO DE MENSAJE ---
       this.logger.log(`[PASO 5] Buscando el cuadro de mensaje...`);
       let messageBox: any;
-
+      
       // Intentar con selector original
       try {
         messageBox = await page.waitForSelector('div[contenteditable="true"][data-tab="10"]', { timeout: 3000 });
@@ -331,7 +371,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (!messageBox) throw new Error('No se encontró el cuadro de mensaje.');
-
+      
       await messageBox.click();
       await this.sleep(this.afterClickDelay);
       this.logger.log(`[PASO 5] ✅ Cuadro de mensaje activo.`);
@@ -339,15 +379,15 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       // --- PASO 6: ESCRIBIR EL MENSAJE (LÍNEA POR LÍNEA) ---
       this.logger.log(`[PASO 6] Escribiendo el mensaje...`);
       const lines = message.split('\n');
-
+      
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-
+        
         if (line.length > 0) {
           // Escribir con delay para que sea natural
           await page.keyboard.type(line, { delay: this.typingDelay });
         }
-
+        
         // Si no es la última línea, agregar salto de línea con Shift+Enter
         if (i < lines.length - 1) {
           await page.keyboard.down('Shift');
@@ -363,7 +403,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       // --- PASO 7: ENVIAR EL MENSAJE ---
       this.logger.log(`[PASO 7] Enviando mensaje...`);
       await page.keyboard.press('Enter');
-      await this.sleep(2000); // Esperar a que se envíe
+      await this.sleep(1500); // Esperar a que se envíe
 
       // --- PASO 8: VERIFICAR ENVÍO (OPTIONAL - SIN FALLAR) ---
       this.logger.log(`[PASO 8] Verificando envío...`);
@@ -387,8 +427,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       const screenshotPath = `error-${formattedPhone}-${timestamp}.png`;
 
       try {
-        await page.screenshot({ path: screenshotPath as `${string}.png`, fullPage: true });
-        this.logger.error(`📸 Captura guardada en: ${screenshotPath}`);
+        //await page.screenshot({ path: screenshotPath as `${string}.png`, fullPage: true });
+        //this.logger.error(`📸 Captura guardada en: ${screenshotPath}`);
       } catch (screenError) {
         this.logger.error(`⚠️  No se pudo guardar screenshot: ${screenError.message}`);
       }
@@ -397,8 +437,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-
-
+  
 
   private async sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));

@@ -25,7 +25,7 @@ export class BrowserService {
         '--disable-dev-shm-usage',
         '--disable-web-security',
         '--disable-features=IsolateOrigins,site-per-process',
-        '--window-size=800,600',
+        '--window-size=800,700',
         '--disable-blink-features=AutomationControlled',
         '--disable-session-crashed-bubble',
         '--disable-infobars',
