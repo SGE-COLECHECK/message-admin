@@ -157,4 +157,39 @@ export class WhatsappController {
     await this.queueService.clearQueue(name);
     return { message: `Sesión '${name}' cerrada y cola limpiada.` };
   }
+
+  // ✅ ENDPOINT DE DEBUG: Procesar la cola manualmente
+  @Post('debug/process-queue')
+  async debugProcessQueue() {
+    this.logger.log('🔧 [DEBUG] Procesando colas manualmente...');
+    
+    // Forzar procesamiento de colas
+    try {
+      // Acceder al método privado mediante reflexión (no es ideal pero funciona)
+      const result = await this.queueService['processAllQueues']();
+      
+      return {
+        success: true,
+        message: '✅ Colas procesadas manualmente',
+        result
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: '❌ Error al procesar colas',
+        error: error.message
+      };
+    }
+  }
+
+  // ✅ ENDPOINT DE DEBUG: Ver estado de Redis
+  @Get('debug/queue-status-detailed')
+  async debugQueueStatus() {
+    const status = await this.queueService.getAllQueuesStatus();
+    return {
+      success: true,
+      timestamp: new Date(),
+      queues: status
+    };
+  }
 }

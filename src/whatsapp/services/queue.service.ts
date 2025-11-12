@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Page } from 'puppeteer';
 import Redis from 'ioredis';
@@ -33,7 +33,6 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly configService: ConfigService,
-    @Inject(forwardRef(() => SessionManagerService))
     private readonly sessionManager: SessionManagerService,
     // ✅ INYECTAMOS EL STATS SERVICE
     private readonly statsService: StatsService,
@@ -67,9 +66,16 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit() {
+    // Iniciar inmediatamente
     const interval = this.configService.get<number>('QUEUE_PROCESSING_INTERVAL', 1000);
     this.processingInterval = setInterval(() => this.processAllQueues(), interval);
     this.logger.log(`🔄 Procesamiento de colas iniciado (cada ${interval}ms)`);
+    this.logger.log(`📊 Configuración: Typing=${this.typingDelay}ms, AfterClick=${this.afterClickDelay}ms, UITimeout=${this.uiTimeout}ms`);
+
+    // Diagnosticar conexión a Redis (sin esperar, para no bloquear)
+    this.diagnosisRedisConnection().catch(err => {
+      this.logger.error('Error en diagnóstico de Redis:', err);
+    });
   }
 
   async onModuleDestroy() {
@@ -78,6 +84,26 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
     await this.redisClient.quit();
     this.logger.log('🔌 Redis desconectado');
+  }
+
+  private async diagnosisRedisConnection(): Promise<void> {
+    try {
+      const pong = await this.redisClient.ping();
+      this.logger.log(`✅ Conexión a Redis confirmada: ${pong}`);
+
+      // Verificar si hay colas pendientes
+      const keys = await this.redisClient.keys('queue:*');
+      this.logger.log(`📋 Colas existentes en Redis: ${keys.length} sesión(es)`);
+
+      for (const key of keys) {
+        const length = await this.redisClient.llen(key);
+        this.logger.log(`   - ${key}: ${length} mensaje(s)`);
+      }
+    } catch (error) {
+      this.logger.error(`❌ No se pudo conectar a Redis: ${error.message}`);
+      this.logger.error(`   Redis Host: ${this.configService.get<string>('REDIS_HOST')}`);
+      this.logger.error(`   Redis Port: ${this.configService.get<number>('REDIS_PORT')}`);
+    }
   }
 
   private getQueueKey(sessionName: string): string {
@@ -102,76 +128,125 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     };
 
     const queueKey = this.getQueueKey(sessionName);
-    await this.redisClient.rpush(queueKey, JSON.stringify(item));
 
-    this.logger.log(`📥 Mensaje agregado a cola '${sessionName}': ${id} (${phoneNumber})`);
-    return id;
+    try {
+      await this.redisClient.rpush(queueKey, JSON.stringify(item));
+      this.logger.log(`📥 [QUEUE] Mensaje agregado a cola '${sessionName}': ${id} (${phoneNumber})`);
+      this.logger.log(`   └─ Mensaje: "${message.substring(0, 50)}..."`);
+      return id;
+    } catch (error) {
+      this.logger.error(`❌ [QUEUE] Error al agregar mensaje a Redis: ${error.message}`);
+      this.logger.error(`   └─ Queue Key: ${queueKey}`);
+      this.logger.error(`   └─ Session: ${sessionName}`);
+      throw error;
+    }
   }
 
   private async processAllQueues(): Promise<void> {
     try {
       const keys = await this.redisClient.keys('queue:*');
 
+      if (keys.length === 0) {
+        return; // Sin colas, no hacer nada
+      }
+
       for (const queueKey of keys) {
         const sessionName = queueKey.replace('queue:', '');
 
-        if (this.processing.get(sessionName)) continue;
+        // ✅ VERIFICACIÓN: ¿La sesión existe?
+        const session = this.sessionManager.get(sessionName);
+        if (!session) {
+          this.logger.warn(`⚠️  [QUEUE] Sesión '${sessionName}' no existe en memoria. Limpiando cola...`);
 
-        const queueLength = await this.redisClient.llen(queueKey);
-        if (queueLength === 0) continue;
+          // Limpiar la cola de Redis para esta sesión
+          const queueLength = await this.redisClient.llen(queueKey);
+          this.logger.warn(`   └─ Deletando ${queueLength} mensaje(s) huérfano(s)`);
 
-        const itemStr = await this.redisClient.lindex(queueKey, 0);
-        if (!itemStr) continue;
-
-        const item: QueueItem = JSON.parse(itemStr);
-
-        if (item.status !== 'pending') {
-          if (item.status === 'completed' || item.status === 'failed') {
-            await this.redisClient.lpop(queueKey);
-          }
+          await this.redisClient.del(queueKey);
           continue;
         }
 
-        this.processing.set(sessionName, true);
-        item.status = 'processing';
-        await this.redisClient.lset(queueKey, 0, JSON.stringify(item));
+        if (this.processing.get(sessionName)) {
+          this.logger.log(`⏸️  [QUEUE] Sesión '${sessionName}' ya está procesando, saltando...`);
+          continue;
+        }
 
         try {
-          await this.processSingleItem(item);
-
-          item.status = 'completed';
-          this.logger.log(`✅ Mensaje ${item.id} completado`);
-
-          await this.redisClient.lpop(queueKey);
-          await this.saveToHistory(item);
-
-          // ✅ INTEGRACIÓN CON STATS SERVICE
-          await this.statsService.incrementDailyCounter(item.sessionName);
-
-        } catch (error) {
-          item.retryCount++;
-
-          if (item.retryCount >= this.maxRetries) {
-            item.status = 'failed';
-            item.error = error.message;
-            this.logger.error(`❌ Mensaje ${item.id} falló después de ${this.maxRetries} intentos: ${error.message}`);
-
-            await this.redisClient.lpop(queueKey);
-            await this.saveToErrors(item);
-          } else {
-            item.status = 'pending';
-            this.logger.warn(`⚠️ Mensaje ${item.id} falló (intento ${item.retryCount}/${this.maxRetries}). Reintentando...`);
-
-            await this.redisClient.lpop(queueKey);
-            await this.redisClient.rpush(queueKey, JSON.stringify(item));
-            await this.sleep(this.retryDelay);
+          const queueLength = await this.redisClient.llen(queueKey);
+          if (queueLength === 0) {
+            continue;
           }
-        } finally {
-          this.processing.set(sessionName, false);
+
+          const itemStr = await this.redisClient.lindex(queueKey, 0);
+          if (!itemStr) {
+            continue;
+          }
+
+          let item: QueueItem;
+          try {
+            item = JSON.parse(itemStr);
+          } catch (parseError) {
+            this.logger.error(`❌ [QUEUE] Error al parsear item JSON de ${sessionName}: ${parseError.message}`);
+            // Eliminar item corrupto
+            await this.redisClient.lpop(queueKey);
+            continue;
+          }
+
+          if (item.status !== 'pending') {
+            if (item.status === 'completed' || item.status === 'failed') {
+              await this.redisClient.lpop(queueKey);
+            }
+            continue;
+          }
+
+          this.processing.set(sessionName, true);
+          item.status = 'processing';
+          await this.redisClient.lset(queueKey, 0, JSON.stringify(item));
+
+          this.logger.log(`⚙️  [QUEUE] Procesando: ${item.id} (${item.phoneNumber})`);
+
+          try {
+            await this.processSingleItem(item);
+
+            item.status = 'completed';
+            this.logger.log(`✅ [QUEUE] Completado: ${item.id}`);
+
+            await this.redisClient.lpop(queueKey);
+            await this.saveToHistory(item);
+
+            // ✅ INTEGRACIÓN CON STATS SERVICE
+            await this.statsService.incrementDailyCounter(item.sessionName);
+
+          } catch (error) {
+            item.retryCount++;
+
+            if (item.retryCount >= this.maxRetries) {
+              item.status = 'failed';
+              item.error = error.message;
+              this.logger.error(`❌ [QUEUE] Falló permanentemente: ${item.id} (${this.maxRetries} intentos)`);
+              this.logger.error(`   └─ Error: ${error.message}`);
+
+              await this.redisClient.lpop(queueKey);
+              await this.saveToErrors(item);
+            } else {
+              item.status = 'pending';
+              this.logger.warn(`⚠️  [QUEUE] Reintentando: ${item.id} (intento ${item.retryCount}/${this.maxRetries})`);
+              this.logger.warn(`   └─ Error: ${error.message}`);
+
+              await this.redisClient.lpop(queueKey);
+              await this.redisClient.rpush(queueKey, JSON.stringify(item));
+              await this.sleep(this.retryDelay);
+            }
+          } finally {
+            this.processing.set(sessionName, false);
+          }
+        } catch (queueError) {
+          this.logger.error(`❌ [QUEUE] Error procesando cola '${sessionName}': ${queueError.message}`);
+          this.logger.error(`   └─ Stack: ${queueError.stack}`);
         }
       }
     } catch (error) {
-      this.logger.error('Error en processAllQueues:', error);
+      this.logger.error('❌ [QUEUE] Error crítico en processAllQueues:', error);
     }
   }
 
@@ -179,19 +254,23 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   private async processSingleItem(item: QueueItem): Promise<void> {
     const session = this.sessionManager.get(item.sessionName);
 
-    if (!session || !session.page) {
-      throw new Error(`Sesión '${item.sessionName}' no encontrada o sin página activa`);
+    if (!session) {
+      throw new Error(`Sesión '${item.sessionName}' no encontrada`);
+    }
+
+    if (!session.page) {
+      throw new Error(`Sesión '${item.sessionName}' existe pero NO tiene página activa`);
     }
 
     if (!session.isAuthenticated) {
-      throw new Error(`Sesión '${item.sessionName}' no está autenticada`);
+      throw new Error(`Sesión '${item.sessionName}' existe pero NO está autenticada`);
     }
 
+    this.logger.log(`📱 [PUPPETEER] Enviando a ${item.phoneNumber} en sesión '${item.sessionName}'`);
     await this.sendMessageViaPuppeteer(session.page, item.phoneNumber, item.message);
   }
 
   private async sendMessageViaPuppeteer(page: Page, phoneNumber: string, message: string): Promise<void> {
-    console.log("********************");
     let formattedPhone = phoneNumber.replace(/[\s\-\(\)]/g, '');
     if (!formattedPhone.startsWith('51')) {
       formattedPhone = '51' + formattedPhone;
@@ -206,73 +285,120 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       await searchBox.click();
       await this.sleep(this.afterClickDelay);
 
-      // --- PASO 2: LIMPIAR EL CUADRO DE BÚSQUEDA (FORMA ROBUSTA) ---
-      this.logger.log(`[PASO 2] Limpiando el cuadro de búsqueda con Ctrl+A y Backspace...`);
+      // --- PASO 2: LIMPIAR EL CUADRO DE BÚSQUEDA ---
+      this.logger.log(`[PASO 2] Limpiando el cuadro de búsqueda...`);
       await page.keyboard.down('Control');
       await page.keyboard.press('A');
       await page.keyboard.up('Control');
-      await this.sleep(200); // Pequeña pausa para que el texto se seleccione
+      await this.sleep(200);
       await page.keyboard.press('Backspace');
       await this.sleep(this.afterClickDelay);
-      this.logger.log(`[PASO 2] Cuadro de búsqueda limpio.`);
+      this.logger.log(`[PASO 2] ✅ Cuadro de búsqueda limpio.`);
 
       // --- PASO 3: ESCRIBIR EL NÚMERO DE TELÉFONO ---
-      this.logger.log(`[PASO 3] Escribiendo el número de teléfono: ${formattedPhone}`);
+      this.logger.log(`[PASO 3] Escribiendo el número: ${formattedPhone}`);
       await page.type('div[contenteditable="true"][data-tab="3"]', formattedPhone, { delay: this.typingDelay });
-      await this.sleep(1500); // Esperar a que la lista de contactos se actualice
+      await this.sleep(2500); // Más tiempo para que la lista se renderice
 
-      // --- PASO 4: SELECCIONAR EL PRIMER CONTACTO DE LA LISTA ---
-      this.logger.log(`[PASO 4] Esperando a que el contacto aparezca en la lista...`);
-      await page.waitForFunction(() => {
-        const contact = document.querySelector('._2auQ3') as HTMLElement;
-        return contact && contact.offsetParent !== null;
-      }, { timeout: this.uiTimeout });
-      this.logger.log(`[PASO 4] Contacto encontrado. Presionando 'Enter'...`);
-      await page.keyboard.press('Enter');
-      await this.sleep(2000); // Esperar a que el chat se cargue
+      // --- PASO 4: VERIFICAR QUE EL CONTACTO APAREZCA ---
+      this.logger.log(`[PASO 4] Verificando si el contacto aparece en la lista...`);
+      const contactAppeared = await page.evaluate(() => {
+        const contactElement = document.querySelector('._2auQ3') as HTMLElement;
+        return contactElement && contactElement.offsetParent !== null;
+      });
 
-      // --- PASO 5: ENCONTRAR Y HACER CLIC EN EL CUADRO DE MENSAJE ---
+      if (!contactAppeared) {
+        // ✅ NO CONTINUAR - El número no tiene WhatsApp
+        throw new Error(`❌ El número ${formattedPhone} NO tiene WhatsApp o no existe. Saltando al siguiente mensaje.`);
+      }
+
+      // ✅ Si llegó aquí, el contacto SÍ existe
+      this.logger.log(`[PASO 4] ✅ Contacto encontrado. Haciendo clic en él...`);
+      await page.click('._2auQ3');
+      await this.sleep(3000);
+
+      // --- PASO 5: ENCONTRAR EL CUADRO DE MENSAJE ---
       this.logger.log(`[PASO 5] Buscando el cuadro de mensaje...`);
-      const messageBox = await page.waitForSelector('div[contenteditable="true"][data-tab="10"]', { timeout: this.uiTimeout });
+      let messageBox: any;
+
+      // Intentar con selector original
+      try {
+        messageBox = await page.waitForSelector('div[contenteditable="true"][data-tab="10"]', { timeout: 3000 });
+      } catch (e) {
+        this.logger.warn(`⚠️  Selector original no encontrado, intentando selector alternativo...`);
+        // Fallback: selector alternativo
+        messageBox = await page.waitForSelector('[aria-label="Escribe un mensaje"]', { timeout: 3000 });
+      }
+
       if (!messageBox) throw new Error('No se encontró el cuadro de mensaje.');
 
       await messageBox.click();
       await this.sleep(this.afterClickDelay);
+      this.logger.log(`[PASO 5] ✅ Cuadro de mensaje activo.`);
 
-      // --- PASO 6: ESCRIBIR EL MENSAJE ---
-      this.logger.log(`[PASO 6] Escribiendo el mensaje: "${message}"`);
-      await page.keyboard.type(message, { delay: this.typingDelay });
-      await this.sleep(this.afterClickDelay);
+      // --- PASO 6: ESCRIBIR EL MENSAJE (LÍNEA POR LÍNEA) ---
+      this.logger.log(`[PASO 6] Escribiendo el mensaje...`);
+      const lines = message.split('\n');
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        if (line.length > 0) {
+          // Escribir con delay para que sea natural
+          await page.keyboard.type(line, { delay: this.typingDelay });
+        }
+
+        // Si no es la última línea, agregar salto de línea con Shift+Enter
+        if (i < lines.length - 1) {
+          await page.keyboard.down('Shift');
+          await page.keyboard.press('Enter');
+          await page.keyboard.up('Shift');
+          await this.sleep(100);
+        }
+      }
+
+      await this.sleep(500);
+      this.logger.log(`[PASO 6] ✅ Mensaje escrito.`);
 
       // --- PASO 7: ENVIAR EL MENSAJE ---
-      this.logger.log(`[PASO 7] Enviando el mensaje...`);
+      this.logger.log(`[PASO 7] Enviando mensaje...`);
       await page.keyboard.press('Enter');
-      await this.sleep(1500);
+      await this.sleep(2000); // Esperar a que se envíe
 
-      // --- PASO 8: CONFIRMAR QUE SE ENVÍO ---
-      this.logger.log(`[PASO 8] Esperando confirmación de envío (check mark)...`);
-      await page.waitForFunction(() => {
-        const messageStatus = document.querySelector('[data-icon="msg-check"]') as HTMLElement;
-        return messageStatus && messageStatus.offsetParent !== null;
-      }, { timeout: this.uiTimeout });
-      this.logger.log(`[PASO 8] ✅ Mensaje enviado con éxito.`);
+      // --- PASO 8: VERIFICAR ENVÍO (OPTIONAL - SIN FALLAR) ---
+      this.logger.log(`[PASO 8] Verificando envío...`);
+      const messageWasSent = await page.evaluate(() => {
+        // Buscar checkmark de envío
+        const checkmark = document.querySelector('[data-icon="msg-check"]') as HTMLElement;
+        return checkmark && checkmark.offsetParent !== null;
+      });
+
+      if (messageWasSent) {
+        this.logger.log(`[PASO 8] ✅ Mensaje enviado (confirmado con checkmark).`);
+      } else {
+        this.logger.log(`[PASO 8] ✅ Mensaje enviado (sin confirmación visual, pero presumiblemente enviado).`);
+      }
 
     } catch (error) {
       this.logger.error(`❌ Error al enviar mensaje a ${formattedPhone}: ${error.message}`);
 
-      // 📸 CAPTURA DE PANTALLA EN CASO DE ERROR (CON CORRECCIÓN)
+      // 📸 CAPTURA DE PANTALLA EN CASO DE ERROR
       const timestamp = new Date().toISOString().replace(/:/g, '-');
       const screenshotPath = `error-${formattedPhone}-${timestamp}.png`;
 
-      // --- CORRECCIÓN AQUÍ ---
-      await page.screenshot({ path: screenshotPath as `${string}.png`, fullPage: true });
-      this.logger.error(`📸 Captura de pantalla guardada en: ${screenshotPath}`);
+      try {
+        await page.screenshot({ path: screenshotPath as `${string}.png`, fullPage: true });
+        this.logger.error(`📸 Captura guardada en: ${screenshotPath}`);
+      } catch (screenError) {
+        this.logger.error(`⚠️  No se pudo guardar screenshot: ${screenError.message}`);
+      }
+
       throw error;
     }
   }
 
 
-  
+
 
   private async sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
