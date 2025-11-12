@@ -294,90 +294,69 @@ private async sendMessageViaPuppeteer(page: Page, phoneNumber: string, message: 
     }
 
     try {
-      // --- PASO 1: ENCONTRAR Y HACER CLIC EN EL CUADRO DE BÚSQUEDA ---
-      this.logger.log(`[PASO 1] Buscando el cuadro de búsqueda...`);
+      // --- PASO 1: ENCONTRAR Y LIMPIAR EL CUADRO DE BÚSQUEDA ---
+      this.logger.log(`[PASO 1] Buscando y limpiando el cuadro de búsqueda...`);
       const searchBox = await page.waitForSelector('div[contenteditable="true"][data-tab="3"]', { timeout: this.uiTimeout });
       if (!searchBox) throw new Error('No se encontró el cuadro de búsqueda.');
 
       await searchBox.click();
       await this.sleep(this.afterClickDelay);
 
-      // --- PASO 2: LIMPIAR EL CUADRO DE BÚSQUEDA ---
-      this.logger.log(`[PASO 2] Limpiando el cuadro de búsqueda...`);
-      await page.keyboard.down('Control');
-      await page.keyboard.press('A');
-      await page.keyboard.up('Control');
-      await this.sleep(200);
+      // Triple clic es más rápido y fiable que Ctrl+A
+      await searchBox.click({ clickCount: 3 });
+      await this.sleep(50);
       await page.keyboard.press('Backspace');
-      await this.sleep(this.afterClickDelay);
-      this.logger.log(`[PASO 2] ✅ Cuadro de búsqueda limpio.`);
+      this.logger.log(`[PASO 1] ✅ Cuadro de búsqueda limpio.`);
 
-      // --- PASO 3: ESCRIBIR EL NÚMERO DE TELÉFONO ---
-      this.logger.log(`[PASO 3] Escribiendo el número: ${formattedPhone}`);
+      // --- PASO 2: ESCRIBIR EL NÚMERO Y PRESIONAR ENTER ---
+      this.logger.log(`[PASO 2] Escribiendo el número y presionando Enter: ${formattedPhone}`);
       await page.type('div[contenteditable="true"][data-tab="3"]', formattedPhone, { delay: this.typingDelay });
-      await this.sleep(1300); // Más tiempo para que la lista se renderice
+      await page.keyboard.press('Enter'); // Enter para abrir el chat
 
-      // --- PASO 4: VERIFICAR QUE EL CONTACTO APAREZCA ---
-      this.logger.log(`[PASO 4] Verificando si el contacto aparece en la lista...`);
+      // --- PASO 3: ESPERAR Y VERIFICAR QUÉ PASÓ ---
+      this.logger.log(`[PASO 3] Verificando si se abrió el chat...`);
       
-      // NUEVA VERIFICACIÓN: Detectar si WhatsApp indica que no hay resultados
-      const noResultsFound = await page.evaluate(() => {
+      // Esperamos un momento a que la interfaz cambie
+      await this.sleep(1500);
+
+      // Verificamos si apareció el mensaje de "no encontrado" o "invitar"
+      const noWhatsAppFound = await page.evaluate(() => {
         const text = document.body.innerText;
         return text.includes('No se encontró ningún chat, contacto ni mensaje') ||
                text.includes('No se encontraron') || 
-               text.includes('No results') ||
-               text.includes('Ningún resultado') ||
-               text.includes('No chats') ||
-               text.includes('Sin resultados') ||
-               text.includes('Este número no está registrado en WhatsApp'); // Mensaje específico para números sin WhatsApp
+               text.includes('Este número no está registrado en WhatsApp') ||
+               text.includes('Invitar a WhatsApp') ||
+               text.includes('Invite to WhatsApp');
       });
 
-      // Si se detecta que no hay resultados, lanzar error inmediatamente
-      if (noResultsFound) {
-        this.logger.error(`❌ WhatsApp mostró "no encontrado" para ${formattedPhone}`);
+      // Si se encontró un mensaje de error, lanzamos el error y nos vamos.
+      if (noWhatsAppFound) {
+        this.logger.error(`❌ Número ${formattedPhone} no tiene WhatsApp o no se encontró.`);
         const error = new Error(`NO_WHATSAPP:${formattedPhone}`);
         error.name = 'NoWhatsAppError';
         throw error;
       }
-      
-      const contactAppeared = await page.evaluate(() => {
-        const contactElement = document.querySelector('._2auQ3') as HTMLElement;
-        return contactElement && contactElement.offsetParent !== null;
-      });
 
-      if (!contactAppeared) {
-        this.logger.warn(`⚠️  El contacto NO apareció en la lista (${formattedPhone}). Intentando con Enter...`);
-        // Fallback: presionar Enter si el contacto no aparece
-        await page.keyboard.press('Enter');
-      } else {
-        this.logger.log(`[PASO 4] ✅ Contacto encontrado. Haciendo clic en él...`);
-        // Hacer clic en el contacto EN VEZ DE presionar Enter
-        await page.click('._2auQ3');
-      }
-
-      await this.sleep(1500); // Esperar a que el chat cargue completamente
-
-      // --- PASO 5: ENCONTRAR EL CUADRO DE MENSAJE ---
-      this.logger.log(`[PASO 5] Buscando el cuadro de mensaje...`);
+      // --- PASO 4: ENCONTRAR EL CUADRO DE MENSAJE Y ENVIAR ---
+      // Si no hubo error, asumimos que el chat se abrió. Buscamos el cuadro de mensaje.
+      this.logger.log(`[PASO 4] Buscando el cuadro de mensaje...`);
       let messageBox: any;
       
-      // Intentar con selector original
       try {
-        messageBox = await page.waitForSelector('div[contenteditable="true"][data-tab="10"]', { timeout: 3000 });
+        messageBox = await page.waitForSelector('div[contenteditable="true"][data-tab="10"]', { timeout: 5000 });
       } catch (e) {
         this.logger.warn(`⚠️  Selector original no encontrado, intentando selector alternativo...`);
-        // Fallback: selector alternativo
-        messageBox = await page.waitForSelector('[aria-label="Escribe un mensaje"]', { timeout: 3000 });
+        messageBox = await page.waitForSelector('[aria-label="Escribe un mensaje"]', { timeout: 5000 });
       }
 
       if (!messageBox) throw new Error('No se encontró el cuadro de mensaje.');
       
       await messageBox.click();
       await this.sleep(this.afterClickDelay);
-      this.logger.log(`[PASO 5] ✅ Cuadro de mensaje activo.`);
+      this.logger.log(`[PASO 4] ✅ Cuadro de mensaje activo.`);
 
-      // --- PASO 6: ESCRIBIR EL MENSAJE (LÍNEA POR LÍNEA) ---
-      this.logger.log(`[PASO 6] Escribiendo el mensaje...`);
+      // --- PASO 5: ESCRIBIR EL MENSAJE (LÍNEA POR LÍNEA CON SHIFT+ENTER) ---
+      this.logger.log(`[PASO 5] Escribiendo el mensaje...`);
       const lines = message.split('\n');
       
       for (let i = 0; i < lines.length; i++) {
@@ -398,46 +377,29 @@ private async sendMessageViaPuppeteer(page: Page, phoneNumber: string, message: 
       }
 
       await this.sleep(500);
-      this.logger.log(`[PASO 6] ✅ Mensaje escrito.`);
+      this.logger.log(`[PASO 5] ✅ Mensaje escrito.`);
 
-      // --- PASO 7: ENVIAR EL MENSAJE ---
-      this.logger.log(`[PASO 7] Enviando mensaje...`);
-      await page.keyboard.press('Enter');
+      // --- PASO 6: ENVIAR EL MENSAJE ---
+      this.logger.log(`[PASO 6] Enviando mensaje...`);
+      await page.keyboard.press('Enter'); // Enter para enviar el mensaje
       await this.sleep(1500); // Esperar a que se envíe
 
-      // --- PASO 8: VERIFICAR ENVÍO (OPTIONAL - SIN FALLAR) ---
-      this.logger.log(`[PASO 8] Verificando envío...`);
-      const messageWasSent = await page.evaluate(() => {
-        // Buscar checkmark de envío
-        const checkmark = document.querySelector('[data-icon="msg-check"]') as HTMLElement;
-        return checkmark && checkmark.offsetParent !== null;
-      });
-
-      if (messageWasSent) {
-        this.logger.log(`[PASO 8] ✅ Mensaje enviado (confirmado con checkmark).`);
-      } else {
-        this.logger.log(`[PASO 8] ✅ Mensaje enviado (sin confirmación visual, pero presumiblemente enviado).`);
-      }
+      this.logger.log(`[PASO 6] ✅ Mensaje enviado.`);
 
     } catch (error) {
       this.logger.error(`❌ Error al enviar mensaje a ${formattedPhone}: ${error.message}`);
-
-      // 📸 CAPTURA DE PANTALLA EN CASO DE ERROR
+      // El resto de tu bloque catch permanece igual...
       const timestamp = new Date().toISOString().replace(/:/g, '-');
       const screenshotPath = `error-${formattedPhone}-${timestamp}.png`;
-
       try {
-        //await page.screenshot({ path: screenshotPath as `${string}.png`, fullPage: true });
-        //this.logger.error(`📸 Captura guardada en: ${screenshotPath}`);
+        await page.screenshot({ path: screenshotPath as `${string}.png`, fullPage: true });
+        this.logger.error(`📸 Captura guardada en: ${screenshotPath}`);
       } catch (screenError) {
         this.logger.error(`⚠️  No se pudo guardar screenshot: ${screenError.message}`);
       }
-
       throw error;
     }
   }
-
-  
 
   private async sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));

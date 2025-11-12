@@ -17,29 +17,72 @@ export class ScraperService {
     return queueId;
   }
 
-  async sendAssistanceReport(reportData: SendAssistanceDto, sessionName: string): Promise<string> {
-    const { student, time_assistance, type_assistance, phoneNumber, communicated } = reportData;
+  /**
+   * Genera una versión aleatoria del mensaje con negritas y alineación perfecta.
+   * @param reportData Datos del reporte.
+   * @returns El string del mensaje generado.
+   */
+  private generateRandomMessage(reportData: SendAssistanceDto): string {
+    const { student, time_assistance, type_assistance, communicated } = reportData;
     const registro = type_assistance === 'entrance' ? 'ENTRADA' : 'SALIDA';
     const today = new Date();
     const formattedDate = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
 
-    let message = `🚨🇨​​​🇴​​​​​🇱​​​​​🇪✅[ ${formattedDate} ]🚨
+    // >>> ENCABEZADO FIJO <<<
+    const header = `🚨🇨​​​🇴​​​​​🇱​​​​​🇪✅[ ${formattedDate} ]🚨`;
 
-📝 Reporte Diario
-➖➖➖➖➖➖➖➖➖
-🎓 *Estudiante*: ▫️${student.toUpperCase()}
-⏰ *Hora de Registro*: ▫️${time_assistance}
-📍 *Ubicación*: ▫️Puerta
-✅  *Registro*: ▫️${registro}
-➖➖➖➖➖➖➖➖➖`;
+    // --- Función auxiliar para alinear texto ---
+    // Añade espacios para que todas las líneas tengan la misma longitud visual
+    const alignLine = (label: string, value: string, totalLength: number = 25): string => {
+      // Usamos un espacio normal y un espacio sin ruptura (\u00A0) para asegurar la alineación
+      const spacesNeeded = totalLength - label.length - value.length;
+      const padding = ' \u00A0'.repeat(Math.max(0, spacesNeeded));
+      return `*${label}*:${padding}${value}`;
+    };
 
+    // Plantilla 1: El Mensaje Original (con alineación perfecta)
+    const originalBody = `📝 *Reporte Diario*
+➖➖➖➖➖➖➖➖
+ ${alignLine('Estudiante', student.toUpperCase())}
+ ${alignLine('Hora de Registro', time_assistance)}
+ ${alignLine('Ubicación', 'Puerta')}
+ ${alignLine('Registro', registro)}
+➖➖➖➖➖➖➖➖`;
+
+    // Plantilla 2: Versión Corta y Directa (con alineación)
+    const shortBody = `🚨 *REGISTRO DE ${registro}*
+➖➖➖➖➖➖➖➖
+ ${alignLine('Estudiante', student.toUpperCase())}
+ ${alignLine('Ubicación', 'Puerta')}
+ ${alignLine('Hora', time_assistance)}
+➖➖➖➖➖➖➖➖`;
+
+    // Plantilla 3: Versión Minimalista (con alineación)
+    const minimalBody = `🚨 *${registro} REGISTRADA*
+➖➖➖➖➖➖
+ ${alignLine('Estudiante', student.toUpperCase())}
+ ${alignLine('Detalles', `Puerta | ${time_assistance}`)}
+➖➖➖➖➖➖`;
+
+    // Elegimos una plantilla de cuerpo al azar
+    const bodies = [originalBody, shortBody, minimalBody];
+    const randomIndex = Math.floor(Math.random() * bodies.length);
+    let selectedBody = bodies[randomIndex];
+
+    // Añadimos el comunicado y el pie de página
     if (communicated) {
-      message += `\n\n📢 *Comunicado*: ${communicated}`;
+      selectedBody += `\n\n${alignLine('Comunicado', communicated)}`;
     }
+    selectedBody += `\n\n✨ ¡Gracias por su apoyo! 🙂 ✨`;
+    
+    // Combinamos el encabezado fijo con el cuerpo aleatorio
+    return `${header}\n\n${selectedBody}`;
+  }
 
-    message += `\n\n✨ ¡Gracias por su apoyo! 🙂 ✨`;
+  async sendAssistanceReport(reportData: SendAssistanceDto, sessionName: string): Promise<string> {
+    const message = this.generateRandomMessage(reportData);
 
-    this.logger.log('📄 Mensaje construido para cola');
-    return await this.sendMessage(phoneNumber, message, sessionName);
+    this.logger.log('📄 Mensaje aleatorio construido para cola');
+    return await this.sendMessage(reportData.phoneNumber, message, sessionName);
   }
 }
