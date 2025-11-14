@@ -9,8 +9,8 @@ services:
       - "3000:3000"
     # ✅ CARGAR ENV DESDE ARCHIVO (si existe)
     env_file:
-      - .env.production
-      #- .env.development
+      #- .env.production
+      - .env.development
     environment:
       # ✅ IMPORTANTE: Dentro de Docker, el host de Redis es el nombre del servicio
       - REDIS_HOST=redis

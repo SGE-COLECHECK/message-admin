@@ -293,6 +293,13 @@ private async sendMessageViaPuppeteer(page: Page, phoneNumber: string, message: 
       formattedPhone = '51' + formattedPhone;
     }
 
+     if (formattedPhone === '51963828458') {
+      this.logger.warn(`⚠️ Número de prueba detectado (${formattedPhone}). Ignorando y continuando.`);
+      return; // <-- Esto es como un "continue" para la función. La termina limpiamente.
+    }
+
+    
+
     try {
       // --- PASO 1: ENCONTRAR Y LIMPIAR EL CUADRO DE BÚSQUEDA ---
       this.logger.log(`[PASO 1] Buscando y limpiando el cuadro de búsqueda...`);
