@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Param, Delete, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete, HttpException, HttpStatus, Logger, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { SessionManagerService } from './services/session-manager.service';
 import { AuthService } from './services/auth.service';
 import { ScraperService } from './services/scraper.service';
@@ -156,6 +157,30 @@ export class WhatsappController {
     this.sessionManager.remove(name);
     await this.queueService.clearQueue(name);
     return { message: `Sesión '${name}' cerrada y cola limpiada.` };
+  }
+
+  // 📸 Endpoint: Captura de pantalla del navegador Puppeteer para una sesión
+  @Get('sessions/:name/screenshot')
+  async getSessionScreenshot(@Param('name') name: string, @Res() res: Response) {
+    const session = this.sessionManager.get(name);
+    if (!session) {
+      throw new HttpException('Sesión no encontrada.', HttpStatus.NOT_FOUND);
+    }
+
+    if (!session.page) {
+      throw new HttpException('Sesión sin página activa.', HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      // Tomar screenshot (no fullPage por defecto, puedes ajustar)
+      const buffer = await session.page.screenshot({ type: 'png', fullPage: false });
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      return res.send(buffer);
+    } catch (error) {
+      this.logger.error(`Error generando screenshot para ${name}: ${error.message}`);
+      throw new HttpException('No se pudo generar screenshot.', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
   }
 
   // ✅ ENDPOINT DE DEBUG: Procesar la cola manualmente

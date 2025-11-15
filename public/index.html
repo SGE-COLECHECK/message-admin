@@ -185,6 +185,13 @@
             <img id="qrImage" src="" style="display: none;">
             <div class="qr-status" id="qrStatus"></div>
         </div>
+        
+        <div style="margin-top: 12px;">
+            <button onclick="captureScreenshot()">📸 Capturar pantalla (sesión seleccionada)</button>
+            <div style="margin-top:10px; text-align:center;">
+                <img id="screenshotImage" src="" alt="Screenshot" style="max-width:100%; border:1px solid #30363d; border-radius:6px; display:none; margin-top:10px;" />
+            </div>
+        </div>
     </div>
 
     <!-- SECCIÓN 2: Test de Mensaje -->
@@ -306,6 +313,34 @@
             selectedSession = name;
             loadSessions();
             log({ message: `Sesión '${name}' seleccionada` }, 'info');
+        }
+
+        async function captureScreenshot() {
+            const name = selectedSession || document.getElementById('newSessionName').value.trim();
+            if (!name) {
+                alert('Selecciona una sesión o ingresa su nombre');
+                return;
+            }
+
+            log(`Solicitando screenshot para sesión '${name}'...`);
+
+            try {
+                const res = await fetch(`/whatsapp/sessions/${encodeURIComponent(name)}/screenshot`);
+                if (!res.ok) {
+                    const txt = await res.text();
+                    log({ error: `Error: ${res.status} ${txt}` }, 'error');
+                    return;
+                }
+
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const img = document.getElementById('screenshotImage');
+                img.src = url;
+                img.style.display = 'block';
+                log({ message: 'Screenshot recibido.' }, 'success');
+            } catch (error) {
+                log({ error: error.message }, 'error');
+            }
         }
 
         // ===== TEST DE MENSAJE =====
