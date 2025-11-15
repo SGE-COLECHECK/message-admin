@@ -62,7 +62,8 @@ export class BrowserService implements OnModuleDestroy {
       // Configuración para lanzar el navegador SIN especificar executablePath
       // Esto hará que Puppeteer use su propio navegador Chromium
       const launchOptions: puppeteer.LaunchOptions = {
-        headless: true, // ✅ FORZADO MODO HEADLESS
+        headless: true,
+        //headless: false, 
         userDataDir: profilePath,
         args: this.getLaunchArgs(),
         timeout: this.DEFAULT_TIMEOUT,
@@ -122,7 +123,7 @@ export class BrowserService implements OnModuleDestroy {
       '--disable-hang-monitor',
       '--disable-gpu', // ✅ Importante en servidores sin GPU
       '--disable-software-rasterizer',
-      '--window-size=1920,1080',
+      '--window-size=800,700',
       '--single-process', // ✅ Reduce uso de recursos en Docker
       '--no-zygote', // ✅ Mejora aislamiento en contenedores
     ];
@@ -141,51 +142,51 @@ export class BrowserService implements OnModuleDestroy {
     return page;
   }
 
-  private async configurePage(page: puppeteer.Page): Promise<void> {
-    // Evasión de detección de automatización
-    await page.evaluateOnNewDocument(() => {
-      // Elimina señales de webdriver
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-      
-      // Simula plugins reales
-      Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5],
-      });
-      
-      // Simula lenguajes
-      Object.defineProperty(navigator, 'languages', {
-        get: () => ['es-ES', 'es'],
-      });
-      
-      // Mockea chrome object
-      (window as any).chrome = {
-        runtime: {},
-      };
-    });
-
-    // User agent realista
-    await page.setUserAgent(
-      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
-
-    // Timeouts configurables desde env
-    const pageTimeout = parseInt(process.env.PUPPETEER_PAGE_TIMEOUT || '30000');
-    const navTimeout = parseInt(process.env.PUPPETEER_NAVIGATION_TIMEOUT || '30000');
+private async configurePage(page: puppeteer.Page): Promise<void> {
+  // Evasión de detección de automatización
+  await page.evaluateOnNewDocument(() => {
+    // Elimina señales de webdriver
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     
-    await page.setDefaultTimeout(pageTimeout);
-    await page.setDefaultNavigationTimeout(navTimeout);
-
-    // Intercepta requests innecesarios para velocidad
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
-        req.abort();
-      } else {
-        req.continue();
-      }
+    // Simula plugins reales
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [1, 2, 3, 4, 5],
     });
-  }
+    
+    // Simula lenguajes
+    Object.defineProperty(navigator, 'languages', {
+      get: () => ['es-ES', 'es'],
+    });
+    
+    // Mockea chrome object
+    (window as any).chrome = {
+      runtime: {},
+    };
+  });
 
+  // User agent realista
+  await page.setUserAgent(
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  );
+
+  // Timeouts configurables desde env
+  const pageTimeout = parseInt(process.env.PUPPETEER_PAGE_TIMEOUT || '30000');
+  const navTimeout = parseInt(process.env.PUPPETEER_NAVIGATION_TIMEOUT || '30000');
+  
+  await page.setDefaultTimeout(pageTimeout);
+  await page.setDefaultNavigationTimeout(navTimeout);
+
+  // ✅ CORREGIDO: Permite CSS y Fuentes, pero sigue bloqueando imágenes para velocidad
+  await page.setRequestInterception(true);
+  page.on('request', (req) => {
+    // Solo bloqueamos imágenes y media, que son lo que más pesa y no son críticos para enviar texto
+    if (['image', 'media'].includes(req.resourceType())) {
+      req.abort();
+    } else {
+      req.continue();
+    }
+  });
+}
   async closeBrowser(sessionName: string): Promise<void> {
     const browser = this.browsers.get(sessionName);
     if (browser && browser.isConnected()) {
