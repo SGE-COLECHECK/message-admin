@@ -80,9 +80,19 @@ export class ScraperService {
   }
 
   async sendAssistanceReport(reportData: SendAssistanceDto, sessionName: string): Promise<string> {
+    // 📊 TIMESTAMP: Inicio del proceso
+    const startTime = Date.now();
+    this.logger.log(`⏱️  [TIMING] Inicio de sendAssistanceReport: ${new Date().toLocaleTimeString()}`);
+    
     const message = this.generateRandomMessage(reportData);
 
     this.logger.log('📄 Mensaje aleatorio construido para cola');
-    return await this.sendMessage(reportData.phoneNumber, message, sessionName);
+    const queueId = await this.sendMessage(reportData.phoneNumber, message, sessionName);
+    
+    // 📊 TIMESTAMP: Mensaje encolado
+    const enqueuedTime = Date.now() - startTime;
+    this.logger.log(`⏱️  [TIMING] Mensaje encolado en ${enqueuedTime}ms`);
+    
+    return queueId;
   }
 }

@@ -209,7 +209,15 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
             await this.processSingleItem(item);
 
             item.status = 'completed';
+            
+            // 📊 TIMING: Calcular tiempo total desde enqueue hasta completado
+            const itemTimestamp = item.timestamp instanceof Date 
+              ? item.timestamp.getTime() 
+              : new Date(item.timestamp).getTime();
+            const totalTime = Date.now() - itemTimestamp;
+            
             this.logger.log(`✅ [QUEUE] Completado: ${item.id}`);
+            this.logger.log(`⏱️  [TIMING] Tiempo total (enqueue → envío): ${totalTime}ms (${(totalTime / 1000).toFixed(2)}s)`);
 
             await this.redisClient.lpop(queueKey);
             await this.saveToHistory(item);
@@ -430,6 +438,11 @@ private async sendMessageViaPuppeteer(page: Page, phoneNumber: string, message: 
       this.logger.log(`[PASO 5] ✅ Mensaje escrito completamente.`);
 
       // --- PASO 6: ENVIAR EL MENSAJE ---
+      // Agregar delay aleatorio entre 0 y 3 segundos para parecer más humano
+      const randomDelay = Math.random() * 3000; // 0-3000ms
+      this.logger.log(`[PASO 6] Esperando ${randomDelay.toFixed(0)}ms antes de enviar (humanización)...`);
+      await this.sleep(randomDelay);
+      
       this.logger.log(`[PASO 6] Enviando mensaje...`);
       await page.keyboard.press('Enter'); // Enter para enviar el mensaje
       await this.sleep(1500); // Esperar a que se envíe
