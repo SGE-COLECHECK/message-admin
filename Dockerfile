@@ -1,59 +1,68 @@
-# ---- Etapa 1: El Constructor (Builder) ----
-# Usamos una imagen completa para tener acceso a todas las herramientas de desarrollo
+# ---- Etapa 1: Builder ----
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copiamos solo los archivos de package para instalar dependencias primero
-# Aprovechamos el cache de Docker si no cambian los packages
-COPY package*.json ./
+# Instala dependencias de compilación temporales
+RUN apk add --no-cache python3 make g++
 
-# Instalamos TODAS las dependencias, incluyendo las de desarrollo
-RUN npm install
+# Copia package files
+COPY package*.json ./# Instala TODAS las dependencias (incluye devDependencies)
+RUN npm ci --only=production && \
+    # Copia también devDependencies para el build
+    npm ci
 
-# Copiamos todo el código fuente
+# Copia el código fuente
 COPY . .
 
-# Compilamos la aplicación
+# Compila la aplicación
 RUN npm run build
 
-
-# ---- Etapa 2: La Imagen de Producción ----
-# Empezamos desde una imagen limpia y ligera
+# ---- Etapa 2: Producción ----
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Instalamos las dependencias del sistema que Puppeteer necesita
+# Instala dependencias del sistema MÍNIMAS pero ESENCIALES para Puppeteer
+# Corrección: usamos chromium-browser y fonts adecuados
 RUN apk add --no-cache \
-    chromium \
+    chromium-browser \
     nss \
     freetype \
-    freetype-dev \
     harfbuzz \
     ca-certificates \
-    ttf-freefont \
-    git \
-    python3 \
-    make \
-    g++
+    ttf-liberation \
+    fontconfig \
+    # Necesario para healthchecks
+    curl
 
-# Le decimos a Puppeteer que no descargue Chromium
+# Configuración crítica para entorno headless
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+    # Evita problem de sandbox en Docker
+    CHROME_DEVEL_SANDBBOX=/usr/lib/chromium/chrome-sandbox \
+    # Locale para evitar errores de renderizado
+    LANG=es_ES.UTF-8 \
+    LANGUAGE=es_ES:en \
+    LC_ALL=es_ES.UTF-8
 
-# Copiamos SOLO las dependencias de producción desde la etapa "builder"
+# Copia solo lo necesario desde builder
 COPY --from=builder /app/node_modules ./node_modules
-# Copiamos el código compilado desde la etapa "builder"
 COPY --from=builder /app/dist ./dist
-# Copiamos otros archivos necesarios como package.json
 COPY --from=builder /app/package*.json ./
-# ---- ¡LÍNEA CLAVE AÑADIDA! ----
-# Copiamos la carpeta 'public' para servir tus archivos estáticos
 COPY --from=builder /app/public ./public
 
-# Exponemos el puerto
-EXPOSE 3000
+# Crea directorios necesarios para persistencia
+RUN mkdir -p /app/profiles /app/.wwebjs_auth
 
-# Comando para iniciar la aplicación
+# Cambia permisos del sandbox de Chrome
+RUN chmod 4755 /usr/lib/chromium/chrome-sandbox
+
+# Usuario no-root para seguridad
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S pptruser -u 1001 -G nodejs && \
+    chown -R pptruser:nodejs /app
+
+USER pptruserEXPOSE3000
+
 CMD ["node", "dist/main.js"]

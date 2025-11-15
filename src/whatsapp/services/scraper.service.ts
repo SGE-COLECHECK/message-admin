@@ -43,25 +43,25 @@ export class ScraperService {
     // Plantilla 1: El Mensaje Original (con alineación perfecta)
     const originalBody = `📝 *Reporte Diario*
 ➖➖➖➖➖➖➖➖
- ${alignLine('Estudiante', student.toUpperCase())}
- ${alignLine('Hora de Registro', time_assistance)}
- ${alignLine('Ubicación', 'Puerta')}
+ ${alignLine('🎓 Estudiante▫️', student.toUpperCase())}
+ ${alignLine('⏰ Hora de Registro▫️', time_assistance)}
+ ${alignLine('📍 Ubicación▫️', 'Puerta')}
  ${alignLine('Registro', registro)}
 ➖➖➖➖➖➖➖➖`;
 
     // Plantilla 2: Versión Corta y Directa (con alineación)
     const shortBody = `🚨 *REGISTRO DE ${registro}*
 ➖➖➖➖➖➖➖➖
- ${alignLine('Estudiante', student.toUpperCase())}
- ${alignLine('Ubicación', 'Puerta')}
- ${alignLine('Hora', time_assistance)}
+ ${alignLine('🎓 Estudiante▫️', student.toUpperCase())}
+ ${alignLine('📍 Ubicación▫️', 'Puerta')}
+ ${alignLine('⏰ Hora▫️', time_assistance)}
 ➖➖➖➖➖➖➖➖`;
 
     // Plantilla 3: Versión Minimalista (con alineación)
     const minimalBody = `🚨 *${registro} REGISTRADA*
 ➖➖➖➖➖➖
- ${alignLine('Estudiante', student.toUpperCase())}
- ${alignLine('Detalles', `Puerta | ${time_assistance}`)}
+ ${alignLine('🎓 Estudiante▫️', student.toUpperCase())}
+ ${alignLine('⏰ Detalles▫️', `📍 Puerta | ${time_assistance}`)}
 ➖➖➖➖➖➖`;
 
     // Elegimos una plantilla de cuerpo al azar

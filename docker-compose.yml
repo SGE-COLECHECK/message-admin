@@ -1,25 +1,23 @@
-# Define los servicios que componen tu aplicación
 services:
-  # Servicio de tu aplicación de WhatsApp
   app:
-    build: . # Construye la imagen usando el Dockerfile de esta carpeta
+    build: .
     container_name: whatsapp_app
     restart: always
     ports:
       - "3000:3000"
-    # ✅ CARGAR ENV DESDE ARCHIVO (si existe)
     env_file:
-      #- .env.production
+      # Asegúrate de que este archivo coincida con tu NODE_ENV
+      #- .env.production # O 
       - .env.development
     environment:
-      # ✅ IMPORTANTE: Dentro de Docker, el host de Redis es el nombre del servicio
+      # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=
       - REDIS_DB=0
-      - NODE_ENV=production
+      - NODE_ENV=production # Debe coincidir con el archivo de env_file
       
-      # Queue Configuration
+      # Queue
       - QUEUE_RETRY_ATTEMPTS=3
       - QUEUE_RETRY_DELAY=5000
       - QUEUE_PROCESSING_INTERVAL=1000
@@ -31,35 +29,35 @@ services:
       
       # Feature Flags
       - USE_QUEUE=true
+      
+      # 🔴 CRÍTICO: Configuración de Chromium
+      # - DISPLAY=:99 # <-- Eliminado, no es necesario en modo headless
+      - CHROME_DEVEL_SANDBOX=/usr/lib/chromium/chrome-sandbox
     volumes:
-      # Volumen para persistir las sesiones de WhatsApp (¡CRÍTICO!)
-      - ./profiles:/app/profiles
-      # Volumen para las sesiones de wwebjs (si tu librería lo usa)
-      - ./wwebjs_auth:/app/.wwebjs_auth
-      # Volumen para servir tus archivos estáticos (como index.html)
-      - ./public:/app/public
-      # Sincroniza la hora del contenedor con la del host
+      - ./profiles:/app/profiles:rw
+      - ./wwebjs_auth:/app/.wwebjs_auth:rw
+      - ./public:/app/public:ro
       - /etc/localtime:/etc/localtime:ro
-    # Añade más memoria compartida, que Chrome necesita para no crashear
-    shm_size: 1gb
-    # Asegura de que Redis esté listo antes de iniciar la aplicación
+    shm_size: 2gb
+    init: true
     depends_on:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      # ✅ CORREGIDO: Usa node para verificar un endpoint de salud
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
-  # Servicio de la base de datos Redis
   redis:
     image: redis:7-alpine
     container_name: whatsapp_redis_queue
     restart: always
+    # ⚠️ CONSIDERACIÓN: Elimina el mapeo de puertos en producción
     ports:
-      - "6379:6379"
+      - "6379:6379" 
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -69,7 +67,6 @@ services:
       timeout: 3s
       retries: 5
 
-# Define el volumen persistente para Redis
 volumes:
   redis_data:
     driver: local
