@@ -351,40 +351,83 @@ private async sendMessageViaPuppeteer(page: Page, phoneNumber: string, message: 
       
       try {
         messageBox = await page.waitForSelector('div[contenteditable="true"][data-tab="10"]', { timeout: 5000 });
+        this.logger.log(`[PASO 4] ✅ Selector específico encontrado: div[contenteditable="true"][data-tab="10"]`);
       } catch (e) {
-        this.logger.warn(`⚠️  Selector original no encontrado, intentando selector alternativo...`);
-        messageBox = await page.waitForSelector('[aria-label="Escribe un mensaje"]', { timeout: 5000 });
+        this.logger.warn(`⚠️  Selector específico no encontrado, intentando alternativa...`);
+        try {
+          messageBox = await page.waitForSelector('[contenteditable="true"]', { timeout: 5000 });
+          this.logger.log(`[PASO 4] ✅ Selector genérico encontrado: [contenteditable="true"]`);
+        } catch (e2) {
+          this.logger.error(`❌ Ningún selector de input encontrado`);
+          const debugInfo = await page.evaluate(() => {
+            const inputs = document.querySelectorAll('[contenteditable="true"]');
+            const ariaInputs = document.querySelectorAll('[aria-label*="mensaje"]');
+            return {
+              contentEditableCount: inputs.length,
+              ariaCount: ariaInputs.length,
+              pageTitle: document.title,
+              currentUrl: window.location.href,
+            };
+          });
+          this.logger.log(`[DEBUG] ${JSON.stringify(debugInfo)}`);
+          throw e2;
+        }
       }
 
       if (!messageBox) throw new Error('No se encontró el cuadro de mensaje.');
       
       await messageBox.click();
       await this.sleep(this.afterClickDelay);
-      this.logger.log(`[PASO 4] ✅ Cuadro de mensaje activo.`);
+      this.logger.log(`[PASO 4] ✅ Cuadro de mensaje activo. Input encontrado y clickeado.`);
 
       // --- PASO 5: ESCRIBIR EL MENSAJE (LÍNEA POR LÍNEA CON SHIFT+ENTER) ---
-      this.logger.log(`[PASO 5] Escribiendo el mensaje...`);
-      const lines = message.split('\n');
+      this.logger.log(`[PASO 5] Escribiendo el mensaje (${message.length} caracteres)...`);
       
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+      try {
+        // Verificar que el input está enfocado
+        const isFocused = await page.evaluate(() => {
+          const input = document.querySelector('[contenteditable="true"]') as HTMLElement;
+          return input === document.activeElement;
+        });
+        this.logger.log(`[PASO 5] Input enfocado: ${isFocused}`);
         
-        if (line.length > 0) {
-          // Escribir con delay para que sea natural
-          await page.keyboard.type(line, { delay: this.typingDelay });
+        if (!isFocused) {
+          this.logger.warn(`⚠️  Input no está enfocado, clickeando nuevamente...`);
+          await messageBox.click();
+          await this.sleep(200);
+        }
+
+        // Dividir mensaje por saltos de línea y escribir línea por línea
+        const lines = message.split('\n');
+        this.logger.log(`[PASO 5] Escribiendo ${lines.length} líneas...`);
+        
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          
+          if (line.length > 0) {
+            // Escribir la línea con delay pequeño
+            await page.keyboard.type(line, { delay: 10 });
+            this.logger.log(`[PASO 5] ✅ Línea ${i + 1}/${lines.length} escrita (${line.length} chars)`);
+          }
+          
+          // Si no es la última línea, agregar salto de línea con Shift+Enter
+          if (i < lines.length - 1) {
+            await page.keyboard.down('Shift');
+            await page.keyboard.press('Enter');
+            await page.keyboard.up('Shift');
+            await this.sleep(50);
+            this.logger.log(`[PASO 5] ➕ Salto de línea insertado (Shift+Enter)`);
+          }
         }
         
-        // Si no es la última línea, agregar salto de línea con Shift+Enter
-        if (i < lines.length - 1) {
-          await page.keyboard.down('Shift');
-          await page.keyboard.press('Enter');
-          await page.keyboard.up('Shift');
-          await this.sleep(100);
-        }
+        this.logger.log(`[PASO 5] ✅ Todas las líneas escritas correctamente`);
+      } catch (e) {
+        this.logger.error(`[PASO 5] ❌ Error escribiendo mensaje:`, e);
+        throw e;
       }
 
-      await this.sleep(500);
-      this.logger.log(`[PASO 5] ✅ Mensaje escrito.`);
+      await this.sleep(200);
+      this.logger.log(`[PASO 5] ✅ Mensaje escrito completamente.`);
 
       // --- PASO 6: ENVIAR EL MENSAJE ---
       this.logger.log(`[PASO 6] Enviando mensaje...`);
