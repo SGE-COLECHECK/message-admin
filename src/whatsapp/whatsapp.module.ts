@@ -6,6 +6,7 @@ import { ScraperService } from './services/scraper.service';
 import { SessionManagerService } from './services/session-manager.service';
 import { QueueService } from './services/queue.service';
 import { StatsService } from './services/stats.service';
+import { ColegioService } from './services/colegio.service';
 
 @Module({
   controllers: [WhatsappController],
@@ -16,6 +17,7 @@ import { StatsService } from './services/stats.service';
     SessionManagerService,
     QueueService,
     StatsService,
+    ColegioService,
   ],
 })
 export class WhatsappModule {}

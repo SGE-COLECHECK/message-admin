@@ -1,8 +1,10 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as puppeteer from 'puppeteer';
 import { Page } from 'puppeteer';
 import Redis from 'ioredis';
 import { SessionManagerService } from './session-manager.service';
+import { BrowserService } from './browser.service';
 // Asegúrate de importar tu StatsService
 import { StatsService } from './stats.service';
 
@@ -36,6 +38,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     private readonly sessionManager: SessionManagerService,
     // ✅ INYECTAMOS EL STATS SERVICE
     private readonly statsService: StatsService,
+    private readonly browserService: BrowserService,
   ) {
     this.redisClient = new Redis({
       host: this.configService.get<string>('REDIS_HOST', 'localhost'),
@@ -92,7 +95,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`✅ Conexión a Redis confirmada: ${pong}`);
       
       // Verificar si hay colas pendientes
-      const keys = await this.redisClient.keys('queue:*');
+  const keys = await this.redisClient.keys('whatsapp-queue:*');
       this.logger.log(`📋 Colas existentes en Redis: ${keys.length} sesión(es)`);
       
       for (const key of keys) {
@@ -107,7 +110,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   private getQueueKey(sessionName: string): string {
-    return `queue:${sessionName}`;
+    return `whatsapp-queue:${sessionName}`;
   }
 
   async addToQueue(
@@ -144,14 +147,14 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
 
   private async processAllQueues(): Promise<void> {
     try {
-      const keys = await this.redisClient.keys('queue:*');
+  const keys = await this.redisClient.keys('whatsapp-queue:*');
 
       if (keys.length === 0) {
         return; // Sin colas, no hacer nada
       }
 
       for (const queueKey of keys) {
-        const sessionName = queueKey.replace('queue:', '');
+          const sessionName = queueKey.replace('whatsapp-queue:', '');
 
         // ✅ VERIFICACIÓN: ¿La sesión existe?
         const session = this.sessionManager.get(sessionName);
@@ -206,16 +209,20 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
           this.logger.log(`⚙️  [QUEUE] Procesando: ${item.id} (${item.phoneNumber})`);
 
           try {
-            await this.processSingleItem(item);
+            // ⏱️ Timeout de seguridad: si processSingleItem toma > 60 segundos, cancelar
+            const timeoutPromise = new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Procesamiento de item excedió 60 segundos')), 60000)
+            );
+            await Promise.race([this.processSingleItem(item), timeoutPromise]);
 
             item.status = 'completed';
-            
+
             // 📊 TIMING: Calcular tiempo total desde enqueue hasta completado
             const itemTimestamp = item.timestamp instanceof Date 
               ? item.timestamp.getTime() 
               : new Date(item.timestamp).getTime();
             const totalTime = Date.now() - itemTimestamp;
-            
+
             this.logger.log(`✅ [QUEUE] Completado: ${item.id}`);
             this.logger.log(`⏱️  [TIMING] Tiempo total (enqueue → envío): ${totalTime}ms (${(totalTime / 1000).toFixed(2)}s)`);
 
@@ -226,42 +233,12 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
             await this.statsService.incrementDailyCounter(item.sessionName);
 
           } catch (error) {
-            // >>>>> INICIO DE LA MODIFICACIÓN CLAVE <<<<<
-            
-            // Si el error es porque el número no tiene WhatsApp, fallar inmediatamente sin reintentar.
-            if (error.name === 'NoWhatsAppError') {
-              item.status = 'failed';
-              item.error = error.message;
-              this.logger.error(`🚫 [QUEUE] Número sin WhatsApp. Fallado sin reintentos: ${item.id}`);
-              this.logger.error(`   └─ Error: ${error.message}`);
-
-              await this.redisClient.lpop(queueKey);
-              await this.saveToErrors(item);
-            } else {
-              // Para cualquier otro error, aplicar la lógica de reintentos normal.
-              item.retryCount++;
-
-              if (item.retryCount >= this.maxRetries) {
-                item.status = 'failed';
-                item.error = error.message;
-                this.logger.error(`❌ [QUEUE] Falló permanentemente: ${item.id} (${this.maxRetries} intentos)`);
-                this.logger.error(`   └─ Error: ${error.message}`);
-
-                await this.redisClient.lpop(queueKey);
-                await this.saveToErrors(item);
-              } else {
-                item.status = 'pending';
-                this.logger.warn(`⚠️  [QUEUE] Reintentando: ${item.id} (intento ${item.retryCount}/${this.maxRetries})`);
-                this.logger.warn(`   └─ Error: ${error.message}`);
-
-                await this.redisClient.lpop(queueKey);
-                await this.redisClient.rpush(queueKey, JSON.stringify(item));
-                await this.sleep(this.retryDelay);
-              }
-            }
-            
-            // >>>>> FIN DE LA MODIFICACIÓN CLAVE <<<<<
-
+            // Fire-and-forget: NO reintentos. Marcar como failed y mover a errores.
+            item.status = 'failed';
+            item.error = error?.message || String(error);
+            this.logger.error(`❌ [QUEUE] Error procesando item ${item.id}: ${item.error}`);
+            await this.redisClient.lpop(queueKey);
+            await this.saveToErrors(item);
           } finally {
             this.processing.set(sessionName, false);
           }
@@ -277,22 +254,120 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
 
   // ✅ AQUÍ está la integración con Puppeteer
   private async processSingleItem(item: QueueItem): Promise<void> {
-    const session = this.sessionManager.get(item.sessionName);
+    const sessionName = item.sessionName;
+    this.logger.log(`📱 [PUPPETEER] Iniciando envío para ${item.phoneNumber} en sesión '${sessionName}'`);
 
-    if (!session) {
-      throw new Error(`Sesión '${item.sessionName}' no encontrada`);
+    try {
+      // Get the browser permanently assigned to this session
+      const browserData = this.browserService.getPoolBrowserForSession(sessionName);
+      if (!browserData) {
+        throw new Error(`No browser assigned to session '${sessionName}'. Session must be created first.`);
+      }
+      const { browser, poolId } = browserData;
+      this.logger.log(`🖥️ [PUPPETEER] Usando Pool Navegador #${poolId} para sesión '${sessionName}'`);
+
+      // Prefer reusing the in-memory Page object that was created during auth.
+      // Reusing the same page avoids opening a new tab which triggers
+      // WhatsApp's "use here" detection when multiple tabs are active.
+      const memorySession = this.sessionManager.get(sessionName);
+      if (memorySession && memorySession.isAuthenticated && memorySession.page) {
+        this.logger.log(`🔁 [QUEUE] Reutilizando la página existente para sesión '${sessionName}' (Pool #${poolId})`);
+        await this.sendMessageViaPuppeteer(memorySession.page, item.phoneNumber, item.message);
+        return;
+      }
+
+      let context: any = null;
+      let page: Page | null = null;
+
+      try {
+        // Some puppeteer/browser builds (or wrappers) might not expose
+        // createIncognitoBrowserContext. Try to use it, otherwise
+        // fall back to opening a new page on the browser instance.
+        try {
+          if (typeof (browser as any).createIncognitoBrowserContext === 'function') {
+            context = await (browser as any).createIncognitoBrowserContext();
+          } else {
+            this.logger.warn('⚠️ [PUPPETEER] createIncognitoBrowserContext no disponible en este browser, usando newPage() como fallback');
+          }
+        } catch (err) {
+          this.logger.warn('⚠️ [PUPPETEER] Falló createIncognitoBrowserContext, fallback a newPage(): ' + (err?.message || err));
+        }
+
+        const cookies = await this.sessionManager.loadSession(sessionName);
+
+        // BACKWARD COMPAT: Si no hay cookies en disco, intentar usar la sesión en memoria
+        if (!cookies || cookies.length === 0) {
+          if (memorySession && memorySession.isAuthenticated && memorySession.page) {
+            this.logger.log(`🔄 [QUEUE] Usando sesión en memoria para '${sessionName}' (no hay cookies en disco)`);
+            await this.sendMessageViaPuppeteer(memorySession.page, item.phoneNumber, item.message);
+            return;
+          }
+          throw new Error(`No session cookies for '${sessionName}'. Login required.`);
+        }
+
+        if (context) {
+          page = await context.newPage();
+        } else {
+          // Fallback: create a page directly on the pooled browser
+          page = await (browser as any).newPage();
+        }
+        const pg = page as Page;
+
+        // Lightweight page configuration to reduce memory and speed-up
+        try {
+          await pg.setUserAgent(
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          );
+          // ⏱️ IMPORTANTE: WhatsApp Web necesita más tiempo
+          // this.uiTimeout (5000ms) es muy corto; usar 30 segundos para navegación
+          const navigationTimeout = 30000; // 30 segundos para cargar WhatsApp Web
+          await pg.setDefaultTimeout(navigationTimeout);
+          await pg.setDefaultNavigationTimeout(navigationTimeout);
+          await pg.setRequestInterception(true);
+          pg.on('request', (req) => {
+            if (['image', 'media'].includes(req.resourceType())) {
+              req.abort();
+            } else {
+              req.continue();
+            }
+          });
+        } catch (err) {
+          // ignore page configure errors
+        }
+
+        // Set cookies before navigating
+        try {
+          await pg.setCookie(...cookies);
+          this.logger.log(`🍪 [PUPPETEER] Cookies establecidas (${cookies.length})`);
+        } catch (err) {
+          this.logger.warn(`No se pudieron setear cookies directamente: ${err?.message || err}`);
+        }
+
+        // Navegar a WhatsApp Web y ejecutar la lógica existente
+        this.logger.log(`📱 [PUPPETEER] Navegando a https://web.whatsapp.com...`);
+        try {
+          await pg.goto('https://web.whatsapp.com', { waitUntil: 'networkidle2', timeout: 30000 });
+        } catch (err) {
+          // Si falla networkidle2, intentar con domcontentloaded (menos estricto)
+          this.logger.warn(`⚠️ [PUPPETEER] networkidle2 falló, reintentando con domcontentloaded: ${err?.message || err}`);
+          await pg.goto('https://web.whatsapp.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
+        }
+        
+        await this.sleep(3000); // Esperar a que cargue completamente
+        this.logger.log(`📱 [PUPPETEER] Página lista, enviando mensaje...`);
+        await this.sendMessageViaPuppeteer(pg, item.phoneNumber, item.message);
+      } finally {
+        try {
+          if (page) await page.close();
+        } catch (e) { /* ignore */ }
+        try {
+          if (context) await context.close();
+        } catch (e) { /* ignore */ }
+      }
+    } catch (error) {
+      this.logger.error(`❌ [QUEUE] Error en procesamiento: ${error.message}`);
+      throw error;
     }
-
-    if (!session.page) {
-      throw new Error(`Sesión '${item.sessionName}' existe pero NO tiene página activa`);
-    }
-
-    if (!session.isAuthenticated) {
-      throw new Error(`Sesión '${item.sessionName}' existe pero NO está autenticada`);
-    }
-
-    this.logger.log(`📱 [PUPPETEER] Enviando a ${item.phoneNumber} en sesión '${item.sessionName}'`);
-    await this.sendMessageViaPuppeteer(session.page, item.phoneNumber, item.message);
   }
 
 private async sendMessageViaPuppeteer(page: Page, phoneNumber: string, message: string): Promise<void> {
@@ -303,10 +378,21 @@ private async sendMessageViaPuppeteer(page: Page, phoneNumber: string, message: 
 
      if (formattedPhone === '51963828458') {
       this.logger.warn(`⚠️ Número de prueba detectado (${formattedPhone}). Ignorando y continuando.`);
-      return; // <-- Esto es como un "continue" para la función. La termina limpiamente.
+      return;
     }
 
-    
+    try {
+      // 🔍 DEBUG: verificar estado de la página antes de enviar
+      const pageInfo = await page.evaluate(() => ({
+        title: document.title,
+        url: window.location.href,
+        hasSearchBox: !!document.querySelector('div[contenteditable="true"][data-tab="3"]'),
+        bodyText: document.body.innerText.substring(0, 200),
+      }));
+      this.logger.log(`📄 [DEBUG] Estado de página: ${JSON.stringify(pageInfo)}`);
+    } catch (e) {
+      this.logger.warn(`⚠️ Error obteniendo info de página: ${e?.message}`);
+    }
 
     try {
       // --- PASO 1: ENCONTRAR Y LIMPIAR EL CUADRO DE BÚSQUEDA ---
@@ -512,8 +598,8 @@ private async sendMessageViaPuppeteer(page: Page, phoneNumber: string, message: 
   }
 
   async getAllQueuesStatus(): Promise<any[]> {
-    const keys = await this.redisClient.keys('queue:*');
-    const sessions = keys.map(key => key.replace('queue:', ''));
+  const keys = await this.redisClient.keys('whatsapp-queue:*');
+      const sessions = keys.map(key => key.replace('whatsapp-queue:', ''));
 
     const statuses = await Promise.all(
       sessions.map(sessionName => this.getQueueStatus(sessionName))

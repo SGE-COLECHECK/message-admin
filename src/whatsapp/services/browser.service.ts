@@ -1,12 +1,15 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import * as puppeteer from 'puppeteer';
 import * as path from 'path';
 import * as fs from 'fs';
 
 @Injectable()
-export class BrowserService implements OnModuleDestroy {
+export class BrowserService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BrowserService.name);
   private readonly browsers = new Map<string, puppeteer.Browser>();
+  // Browser pool - cada elemento tiene su ID y está asignado a una sesión
+  private readonly pool: Array<{ id: number; browser: puppeteer.Browser; sessionName?: string }> = [];
+  private maxBrowsers = parseInt(process.env.MAX_BROWSERS || '3', 10);
   private readonly DEFAULT_TIMEOUT = 30000;
 
   /**
@@ -107,6 +110,81 @@ export class BrowserService implements OnModuleDestroy {
     } catch (error) {
       this.logger.error(`❌ Error iniciando browser para '${sessionName}':`, error);
       throw error;
+    }
+  }
+
+  // ------------------- Browser Pool methods -------------------
+  async onModuleInit(): Promise<void> {
+    this.logger.log(`🧰 Inicializando pool de ${this.maxBrowsers} navegadores`);
+    for (let i = 0; i < this.maxBrowsers; i++) {
+      try {
+        // Todos los navegadores del pool son visibles (headless: false) para que veas qué pasa
+        const launchOptions: puppeteer.LaunchOptions = {
+          headless: false, // ✅ Ahora SÍ ves lo que pasa en cada navegador del pool
+          args: this.getLaunchArgs(),
+          timeout: this.DEFAULT_TIMEOUT,
+          protocolTimeout: this.DEFAULT_TIMEOUT,
+          ignoreDefaultArgs: ['--enable-automation'],
+        };
+        const browser = await puppeteer.launch(launchOptions);
+        const pages = await browser.pages();
+        if (pages.length > 0) {
+          await this.configurePage(pages[0]);
+        }
+        this.pool.push({ id: i + 1, browser, sessionName: undefined });
+        this.logger.log(`✅ Pool Navegador #${i + 1} iniciado`);
+      } catch (err) {
+        this.logger.error(`❌ Error iniciando Pool Navegador #${i + 1}:`, err.message || err);
+      }
+    }
+  }
+
+  // ================ MÉTODOS PARA ASIGNAR NAVEGADOR A SESIÓN ================
+  /**
+   * Asigna un navegador del pool a una sesión de forma PERMANENTE
+   * Cada sesión obtiene su propio navegador (1:1)
+   * @param sessionName nombre de la sesión
+   * @returns { browser, poolId (1, 2 o 3) }
+   */
+  async assignPoolBrowserToSession(sessionName: string): Promise<{ browser: puppeteer.Browser; poolId: number }> {
+    // Si ya tiene asignado un navegador, retórnalo
+    const existing = this.pool.find(p => p.sessionName === sessionName);
+    if (existing && existing.browser.isConnected()) {
+      this.logger.log(`♻️ Navegador Pool #${existing.id} ya asignado a '${sessionName}'`);
+      return { browser: existing.browser, poolId: existing.id };
+    }
+
+    // Buscar el primer navegador libre
+    const free = this.pool.find(p => !p.sessionName && p.browser.isConnected());
+    if (!free) {
+      throw new Error(`❌ No hay navegadores disponibles en el pool. MAX_BROWSERS=${this.maxBrowsers}`);
+    }
+
+    // Asignar permanentemente
+    free.sessionName = sessionName;
+    this.logger.log(`✅ Navegador Pool #${free.id} asignado a sesión '${sessionName}'`);
+    return { browser: free.browser, poolId: free.id };
+  }
+
+  /**
+   * Obtiene el navegador asignado a una sesión
+   */
+  getPoolBrowserForSession(sessionName: string): { browser: puppeteer.Browser; poolId: number } | null {
+    const entry = this.pool.find(p => p.sessionName === sessionName);
+    if (entry && entry.browser.isConnected()) {
+      return { browser: entry.browser, poolId: entry.id };
+    }
+    return null;
+  }
+
+  /**
+   * Libera el navegador de una sesión (lo devuelve al pool disponible)
+   */
+  releasePoolBrowserFromSession(sessionName: string): void {
+    const entry = this.pool.find(p => p.sessionName === sessionName);
+    if (entry) {
+      entry.sessionName = undefined;
+      this.logger.log(`🔓 Navegador Pool #${entry.id} liberado de '${sessionName}'`);
     }
   }
 

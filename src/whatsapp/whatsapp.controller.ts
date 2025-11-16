@@ -4,7 +4,9 @@ import { SessionManagerService } from './services/session-manager.service';
 import { AuthService } from './services/auth.service';
 import { ScraperService } from './services/scraper.service';
 import { QueueService } from './services/queue.service';
+import { ColegioService } from './services/colegio.service';
 import { CreateSessionDto } from './dto/create-session.dto';
+import { CreateColegioDto } from './dto/create-colegio.dto';
 import { SendAssistanceDto } from './dto/send-assistance.dto';
 import { Session } from './interfaces/session.interface';
 
@@ -17,7 +19,103 @@ export class WhatsappController {
     private readonly authService: AuthService,
     private readonly scraperService: ScraperService,
     private readonly queueService: QueueService,
+    private readonly colegioService: ColegioService,
   ) {}
+
+  // ✅ ENDPOINTS DE COLEGIOS (Eficiente y simple)
+  @Post('colegios')
+  async createColegio(@Body() createColegioDto: CreateColegioDto) {
+    const { colegioId, colegioName, phoneNumber } = createColegioDto;
+
+    try {
+      const colegio = this.colegioService.createColegio(colegioId, colegioName, phoneNumber);
+      return {
+        success: true,
+        message: `Colegio '${colegioId}' registrado exitosamente`,
+        colegio
+      };
+    } catch (error) {
+      throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    }
+  }
+
+  @Get('colegios')
+  async listColegios() {
+    const colegios = this.colegioService.getAll();
+    return {
+      total: colegios.length,
+      colegios
+    };
+  }
+
+  @Get('colegios/:colegioId')
+  async getColegioInfo(@Param('colegioId') colegioId: string) {
+    const colegio = this.colegioService.findById(colegioId);
+    if (!colegio) {
+      throw new HttpException(`Colegio '${colegioId}' no encontrado.`, HttpStatus.NOT_FOUND);
+    }
+    return colegio;
+  }
+
+  @Post('colegios/:colegioId/sessions')
+  async createSessionForColegio(@Param('colegioId') colegioId: string) {
+    const colegio = this.colegioService.findById(colegioId);
+    if (!colegio) {
+      throw new HttpException(`Colegio '${colegioId}' no encontrado.`, HttpStatus.NOT_FOUND);
+    }
+
+    if (this.sessionManager.get(colegioId)) {
+      throw new HttpException(`La sesión para '${colegioId}' ya existe.`, HttpStatus.CONFLICT);
+    }
+
+    try {
+      const { page, isAuthenticated, poolId } = await this.authService.createSessionAndGoToWhatsApp(colegioId);
+
+      const session: Session = {
+        name: colegioId,
+        page,
+        isAuthenticated,
+        profilePath: ''
+      };
+      this.sessionManager.set(session);
+
+      if (isAuthenticated) {
+        this.colegioService.setAuthenticated(colegioId);
+        return {
+          message: `Sesión para '${colegioId}' recuperada. Ya estás autenticado.`,
+          isAuthenticated: true,
+          poolId,
+          qrCode: null
+        };
+      }
+
+      try {
+        const qrCode = await this.authService.getQrCode(page);
+        session.qrCode = qrCode;
+
+        this.authService.waitForAuthentication(page).then(async () => {
+          this.sessionManager.setAuthenticated(colegioId);
+          this.colegioService.setAuthenticated(colegioId);
+          // 💾 Guardar cookies automáticamente después de autenticar
+          await this.authService.exportAndSaveCookies(page, colegioId);
+        }).catch(err => {
+          this.logger.warn(`La autenticación para ${colegioId} falló: ${err.message}`);
+        });
+
+        return {
+          message: `Sesión para '${colegioId}' creada. Escanea el QR en Pool Navegador #${poolId}.`,
+          isAuthenticated: false,
+          poolId,
+          qrCode
+        };
+      } catch (error) {
+        this.sessionManager.remove(colegioId);
+        throw new HttpException({ message: error.message }, HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+    } catch (error) {
+      throw new HttpException({ message: error.message }, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
 
   @Post('sessions')
   async createSession(@Body() createSessionDto: CreateSessionDto) {
@@ -27,7 +125,7 @@ export class WhatsappController {
     }
 
     try {
-      const { page, isAuthenticated } = await this.authService.createSessionAndGoToWhatsApp(name);
+      const { page, isAuthenticated, poolId } = await this.authService.createSessionAndGoToWhatsApp(name);
 
       const session: Session = { 
         name, 
@@ -40,7 +138,8 @@ export class WhatsappController {
       if (isAuthenticated) {
         return { 
           message: `Sesión '${name}' recuperada con éxito. Ya estás autenticado.`, 
-          isAuthenticated: true, 
+          isAuthenticated: true,
+          poolId,
           qrCode: null 
         };
       }
@@ -49,15 +148,18 @@ export class WhatsappController {
         const qrCode = await this.authService.getQrCode(page);
         session.qrCode = qrCode;
         
-        this.authService.waitForAuthentication(page).then(() => {
+        this.authService.waitForAuthentication(page).then(async () => {
           this.sessionManager.setAuthenticated(name);
+          // 💾 Guardar cookies automáticamente después de autenticar
+          await this.authService.exportAndSaveCookies(page, name);
         }).catch(err => {
           this.logger.warn(`La autenticación para ${name} falló o expiró: ${err.message}`);
         });
         
         return { 
-          message: `Sesión '${name}' creada. Escanea el QR.`, 
-          isAuthenticated: false, 
+          message: `Sesión '${name}' creada. Escanea el QR en Pool Navegador #${poolId}.`, 
+          isAuthenticated: false,
+          poolId,
           qrCode 
         };
       } catch (error) {

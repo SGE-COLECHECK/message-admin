@@ -1,24 +1,56 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Page } from 'puppeteer';
 import * as fs from 'fs';
+import * as path from 'path';
 import { BrowserService } from './browser.service';
+import { SessionManagerService } from './session-manager.service';
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   
-  constructor(private readonly browserService: BrowserService) {}
+  constructor(
+    private readonly browserService: BrowserService,
+    private readonly sessionManager: SessionManagerService,
+  ) {}
 
   private async sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  async createSessionAndGoToWhatsApp(sessionName: string): Promise<{ page: Page; isAuthenticated: boolean }> {
-    const profilePath = this.browserService.createProfileDir(sessionName);
-    await this.browserService.launchBrowser(sessionName, profilePath);
-    const page = await this.browserService.createPage(sessionName);
+  private async configurePage(page: Page): Promise<void> {
+    await page.setUserAgent(
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    );
+    await page.setDefaultTimeout(30000);
+    await page.setDefaultNavigationTimeout(30000);
+  }
 
-    this.logger.log('🌐 Navegando a WhatsApp Web...');
+  async createSessionAndGoToWhatsApp(sessionName: string): Promise<{ page: Page; isAuthenticated: boolean; poolId: number }> {
+    // 🎯 Asignar navegador del pool a esta sesión
+    const { browser, poolId } = await this.browserService.assignPoolBrowserToSession(sessionName);
+    this.logger.log(`🔗 Sesión '${sessionName}' asignada a Pool Navegador #${poolId}`);
+
+    // Crear una página en el navegador asignado
+    const page = await browser.newPage();
+    await this.configurePage(page);
+
+    // Antes de navegar, intentar cargar cookies existentes (persistidas en profiles/{sessionName}/cookies.json)
+    try {
+      const cookies = await this.sessionManager.loadSession(sessionName);
+      if (cookies && cookies.length > 0) {
+        try {
+          await page.setCookie(...cookies);
+          this.logger.log(`🍪 Cookies cargadas en page desde profiles/${sessionName}/cookies.json (${cookies.length})`);
+        } catch (err) {
+          this.logger.warn(`⚠️ No se pudieron setear cookies en la página: ${err?.message || err}`);
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`⚠️ Error leyendo cookies persistidas para ${sessionName}: ${err?.message || err}`);
+    }
+
+    this.logger.log(`🌐 [Pool #${poolId}] Navegando a WhatsApp Web...`);
     await page.goto('https://web.whatsapp.com', {
       waitUntil: 'domcontentloaded',
       timeout: 60000,
@@ -31,11 +63,11 @@ export class AuthService {
 
     if (isAlreadyAuthenticated) {
       this.logger.log('✅ Sesión ya estaba activa. No se necesita QR.');
-      return { page, isAuthenticated: true };
+      return { page, isAuthenticated: true, poolId };
     }
 
     this.logger.log('⏳ Sesión no activa. Procediendo a generar QR...');
-    return { page, isAuthenticated: false };
+    return { page, isAuthenticated: false, poolId };
   }
 
   async checkAuthStatus(page: Page): Promise<boolean> {
@@ -141,6 +173,20 @@ export class AuthService {
       this.logger.log(`📸 Screenshot guardado en ${screenshotPath}`);
       
       throw new Error('No se pudo completar la autenticación. Timeout esperando.');
+    }
+  }
+
+  async exportAndSaveCookies(page: Page, colegioId: string): Promise<void> {
+    try {
+      const cookies = await page.cookies();
+      if (cookies && cookies.length > 0) {
+        await this.sessionManager.saveSession(colegioId, cookies);
+        this.logger.log(`💾 Cookies guardadas para colegio '${colegioId}' (${cookies.length} cookies)`);
+      } else {
+        this.logger.warn(`⚠️ No se encontraron cookies para guardar en colegio '${colegioId}'`);
+      }
+    } catch (err) {
+      this.logger.error(`❌ Error exportando cookies para '${colegioId}': ${err?.message || err}`);
     }
   }
 
