@@ -45,14 +45,27 @@ export class BrowserService implements OnModuleDestroy {
       this.logger.log(`📁 Directorio de perfil creado: ${profilePath}`);
     }
 
-    // Limpia SingletonLock para evitar conflictos
+    // Limpia archivos de lock para evitar conflictos con procesos Chrome anteriores
     const singletonLockPath = path.join(profilePath, 'SingletonLock');
+    const singletonSocketPath = path.join(profilePath, 'SingletonSocket');
+    
+    // Eliminar SingletonLock
     if (fs.existsSync(singletonLockPath)) {
       try {
         fs.unlinkSync(singletonLockPath);
         this.logger.log(`🧹 SingletonLock eliminado para '${sessionName}'`);
       } catch (error) {
         this.logger.warn(`⚠️ No se pudo eliminar SingletonLock: ${error.message}`);
+      }
+    }
+    
+    // Eliminar SingletonSocket
+    if (fs.existsSync(singletonSocketPath)) {
+      try {
+        fs.unlinkSync(singletonSocketPath);
+        this.logger.log(`🧹 SingletonSocket eliminado para '${sessionName}'`);
+      } catch (error) {
+        this.logger.warn(`⚠️ No se pudo eliminar SingletonSocket: ${error.message}`);
       }
     }
 
