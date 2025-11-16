@@ -17,67 +17,74 @@ export class ScraperService {
     return queueId;
   }
 
-  /**
-   * Genera una versión aleatoria del mensaje con negritas y alineación perfecta.
-   * @param reportData Datos del reporte.
-   * @returns El string del mensaje generado.
-   */
-  private generateRandomMessage(reportData: SendAssistanceDto): string {
-    const { student, time_assistance, type_assistance, communicated } = reportData;
-    const registro = type_assistance === 'entrance' ? 'ENTRADA' : 'SALIDA';
-    const today = new Date();
-    const formattedDate = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+/**
+ * Genera un mensaje de reporte de asistencia rápido y con un formato fijo.
+ * @param reportData - Objeto con los datos del reporte.
+ * @returns El string del mensaje formateado.
+ */
+private generateRandomMessage(reportData: SendAssistanceDto): string {
+  const { student, time_assistance, type_assistance } = reportData;
 
-    // >>> ENCABEZADO FIJO <<<
-    const header = `🚨🇨​​​🇴​​​​​🇱​​​​​🇪✅[ ${formattedDate} ]🚨`;
+  // --- Funciones auxiliares simples ---
+  const formatDate = (date: Date): string => {
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${month}/${day}/${year}`;
+  };
 
-    // --- Función auxiliar para alinear texto ---
-    // Añade espacios para que todas las líneas tengan la misma longitud visual
-    const alignLine = (label: string, value: string, totalLength: number = 25): string => {
-      // Usamos un espacio normal y un espacio sin ruptura (\u00A0) para asegurar la alineación
-      const spacesNeeded = totalLength - label.length - value.length;
-      const padding = ' \u00A0'.repeat(Math.max(0, spacesNeeded));
-      return `*${label}*:${padding}${value}`;
-    };
+const abbreviateName = (fullName: string): string => {
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length === 0) return '';
 
-    // Plantilla 1: El Mensaje Original (con alineación perfecta)
-    const originalBody = `📝 *Reporte Diario*
-➖➖➖➖➖➖➖➖
- ${alignLine('🎓 Estudiante▫️', student.toUpperCase())}
- ${alignLine('⏰ Hora de Registro▫️', time_assistance)}
- ${alignLine('📍 Ubicación▫️', 'Puerta')}
- ${alignLine('Registro', registro)}
-➖➖➖➖➖➖➖➖`;
+    // Asignamos cada parte del nombre
+    const firstName = parts[0];
+    const secondName = parts[1];
+    const firstSurname = parts[2];
+    const secondSurname = parts[3];
 
-    // Plantilla 2: Versión Corta y Directa (con alineación)
-    const shortBody = `🚨 *REGISTRO DE ${registro}*
-➖➖➖➖➖➖➖➖
- ${alignLine('🎓 Estudiante▫️', student.toUpperCase())}
- ${alignLine('📍 Ubicación▫️', 'Puerta')}
- ${alignLine('⏰ Hora▫️', time_assistance)}
-➖➖➖➖➖➖➖➖`;
+    // Empezamos con el primer nombre completo
+    let result = firstName.toUpperCase();
 
-    // Plantilla 3: Versión Minimalista (con alineación)
-    const minimalBody = `🚨 *${registro} REGISTRADA*
-➖➖➖➖➖➖
- ${alignLine('🎓 Estudiante▫️', student.toUpperCase())}
- ${alignLine('⏰ Detalles▫️', `📍 Puerta | ${time_assistance}`)}
-➖➖➖➖➖➖`;
-
-    // Elegimos una plantilla de cuerpo al azar
-    const bodies = [originalBody, shortBody, minimalBody];
-    const randomIndex = Math.floor(Math.random() * bodies.length);
-    let selectedBody = bodies[randomIndex];
-
-    // Añadimos el comunicado y el pie de página
-    if (communicated) {
-      selectedBody += `\n\n${alignLine('Comunicado', communicated)}`;
+    // Si hay segundo nombre, añadimos solo su inicial
+    if (secondName) {
+        result += ` ${secondName.charAt(0).toUpperCase()}.`;
     }
-    selectedBody += `\n\n✨ ¡Gracias por su apoyo! 🙂 ✨`;
-    
-    // Combinamos el encabezado fijo con el cuerpo aleatorio
-    return `${header}\n\n${selectedBody}`;
-  }
+
+    // Si hay primer apellido, lo añadimos completo
+    if (firstSurname) {
+        result += ` ${firstSurname.toUpperCase()}`;
+    }
+
+    // Si hay segundo apellido, añadimos solo su inicial
+    if (secondSurname) {
+        result += ` ${secondSurname.charAt(0).toUpperCase()}.`;
+    }
+
+    return result;
+};
+
+  const formatTime = (time: string): string => time.substring(0, 5);
+
+  // --- Construcción del mensaje ---
+  const registro = type_assistance === 'entrance' ? 'ENTRADA' : 'SALIDA';
+  const formattedDate = formatDate(new Date());
+  const formattedTime = formatTime(time_assistance);
+  const abbreviatedName = abbreviateName(student);
+
+  // >>> CAMBIO 1: PON AQUÍ EL EMOJI QUE QUIERAS <<<
+  const initialEmoji = '🚨'; // Reemplaza '🚨' por '📋', '🔔', o el que quieras
+
+  const header = `${initialEmoji}🇨​​​​​🇴​​​​​🇱​​​​​🇪✅ [${formattedDate}]`;
+  const separator = '➖➖➖➖➖➖➖➖➖➖';
+  const studentLine = `🎓 *Estudiante:* ▫️ ${abbreviatedName}`;
+  const timeLine = `⏰ *${registro}:* ▫️${formattedTime}`;
+
+  // >>> CAMBIO 2: PON AQUÍ EL MENSAJE FINAL QUE QUIERAS <<<
+  const footer = '✨ ¡Gracias por su apoyo! 🙂 ✨'; // Reemplaza esto por lo que quieras
+
+  return `${header}\n${separator}\n${studentLine}\n${timeLine}\n${separator}\n${footer}`;
+}
 
   async sendAssistanceReport(reportData: SendAssistanceDto, sessionName: string): Promise<string> {
     // 📊 TIMESTAMP: Inicio del proceso
