@@ -75,8 +75,8 @@ export class BrowserService implements OnModuleDestroy {
       // Configuración para lanzar el navegador SIN especificar executablePath
       // Esto hará que Puppeteer use su propio navegador Chromium
       const launchOptions: puppeteer.LaunchOptions = {
-        //headless: true,
-        headless: false, 
+        headless: true,
+        //headless: false, 
         userDataDir: profilePath,
         args: this.getLaunchArgs(),
         timeout: this.DEFAULT_TIMEOUT,
