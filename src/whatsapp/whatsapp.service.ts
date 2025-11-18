@@ -131,17 +131,19 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     };
 
     const abbreviateName = (fullName: string): string => {
-        const parts = fullName.trim().split(/\s+/);
-        if (parts.length === 0) return '';
-        const firstName = parts[0];
-        const secondName = parts[1];
-        const firstSurname = parts[2];
-        const secondSurname = parts[3];
-        let result = firstName.toUpperCase();
-        if (secondName) result += ` ${secondName.charAt(0).toUpperCase()}.`;
-        if (firstSurname) result += ` ${firstSurname.toUpperCase()}`;
-        if (secondSurname) result += ` ${secondSurname.charAt(0).toUpperCase()}.`;
-        return result;
+      // Filtra para eliminar espacios en blanco accidentales y obtener un array limpio de partes del nombre.
+      const parts = fullName.trim().split(/\s+/).filter(p => p);
+      if (parts.length === 0) {
+        return ''; // Si el nombre está vacío, devuelve una cadena vacía.
+      }
+
+      // Asume que el primer elemento es el primer nombre y el penúltimo es el apellido paterno.
+      const firstName = parts[0];
+      const firstSurname = parts.length > 1 ? parts[parts.length - 2] : '';
+      const secondSurname = parts.length > 1 ? parts[parts.length - 1] : '';
+
+      // Construye el nombre abreviado de forma segura.
+      return `${firstName.toUpperCase()} ${firstSurname.toUpperCase()} ${secondSurname ? secondSurname.charAt(0).toUpperCase() + '.' : ''}`.trim();
     };
 
     const formatTime = (time: string): string => time.substring(0, 5);
