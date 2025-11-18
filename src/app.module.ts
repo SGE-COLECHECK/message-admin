@@ -3,7 +3,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { ConfigModule } from '@nestjs/config';
-import whatsappAccountsConfig from './whatsapp/whatsapp-accounts.config';
+import whatsappAccountsConfig from 'whatsapp-accounts.config';
 
 @Module({
   imports: [

@@ -82,17 +82,32 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       this.browser = await puppeteer.connect({ browserWSEndpoint: browserWSEndpointFromConfig || browserWSEndpoint });
       this.logger.log(`✅ Conectado al navegador ${browserType}.`);
 
+      // --- INICIO: Lógica mejorada para identificar la cuenta y cargar WhatsApp ---
+      const accountDescription = this.configService.get<string>('description', this.accountId);
+
+      // 1. Abrir una página de bienvenida para identificar la ventana del navegador.
+      const welcomePage = await this.browser.newPage();
+      await welcomePage.setContent(`
+        <html style="background-color: #2c3e50; color: #ecf0f1; display: flex; justify-content: center; align-items: center; height: 100%; font-family: sans-serif;">
+          <head><title>${accountDescription}</title></head>
+          <body><h1>Conectando a: ${accountDescription}</h1></body>
+        </html>
+      `);
+
+      // 2. Buscar una página de WhatsApp existente o crear una nueva.
       const pages = await this.browser.pages();
       const whatsappUrl = this.configService.get<string>('WHATSAPP_URL', 'https://web.whatsapp.com/');
       this.page = pages.find(p => p.url().startsWith(whatsappUrl)) || await this.browser.newPage();
       
       if (!this.page.url().startsWith(whatsappUrl)) {
+        this.logger.log(`No se encontró página de WhatsApp. Navegando a ${whatsappUrl}...`);
         await this.page.goto(whatsappUrl, { waitUntil: 'networkidle2' });
       }
+      // --- FIN: Lógica mejorada ---
 
       // Ajustar el tamaño de la ventana (viewport)
-      const width = this.configService.get<number>('WHATSAPP_VIEWPORT_WIDTH', 1280);
-      const height = this.configService.get<number>('WHATSAPP_VIEWPORT_HEIGHT', 800);
+      const width = +this.configService.get<string>('WHATSAPP_VIEWPORT_WIDTH', '1280');
+      const height = +this.configService.get<string>('WHATSAPP_VIEWPORT_HEIGHT', '800');
       if (this.page) {
         await this.page.setViewport({ width, height });
         this.logger.log(`📐 Viewport ajustado a ${width}x${height}.`);
