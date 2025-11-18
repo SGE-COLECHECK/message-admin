@@ -206,6 +206,14 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       });
 
       if (noWhatsAppFound) {
+        // --- INICIO: Lógica de seguridad para evitar envío a contacto incorrecto ---
+        this.logger.warn(`El número ${formattedPhone} no tiene WhatsApp. Limpiando búsqueda...`);
+        // Busca y hace clic en el botón "Atrás" para salir de la pantalla de "no encontrado"
+        const backButton = await this.page.$('button[aria-label="Atrás"], button[aria-label="Back"]');
+        if (backButton) {
+          await backButton.click();
+        }
+        // --- FIN: Lógica de seguridad ---
         throw new Error(`El número ${formattedPhone} no tiene WhatsApp.`);
       }
 
