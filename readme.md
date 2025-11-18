@@ -14,3 +14,5 @@ rm -rf /root/message-admin/profiles/ieindependencia
 
 # Luego reinicia - se crearán nuevos perfiles limpios
 npm run start:dev
+
+microsoft-edge --remote-debugging-port=9222

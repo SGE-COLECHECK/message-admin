@@ -1,28 +1,27 @@
-import { IsString, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsBoolean, IsOptional, IsIn } from 'class-validator';
 
 export class SendAssistanceDto {
-  @IsString()
-  student: string;
-
   @IsString()
   time_assistance: string;
 
   @IsString()
-  type_assistance: 'entrance' | 'exit'; // Más específico
+  student: string;
 
   @IsString()
   phoneNumber: string;
 
-  // --- NUEVOS CAMPOS ---
-  @IsOptional() // Hacemos el campo opcional por si no siempre se envía
-  @IsBoolean()
-  classroom: boolean;
+  @IsIn(['entrance', 'exit'])
+  type_assistance: 'entrance' | 'exit';
 
   @IsOptional()
   @IsBoolean()
-  isCommunicated: boolean;
+  classroom?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isCommunicated?: boolean;
 
   @IsOptional()
   @IsString()
-  communicated: string;
+  communicated?: string;
 }

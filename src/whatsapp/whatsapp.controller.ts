@@ -1,220 +1,46 @@
-import { Controller, Get, Post, Body, Param, Delete, HttpException, HttpStatus, Logger, Res } from '@nestjs/common';
-import { Response } from 'express';
-import { SessionManagerService } from './services/session-manager.service';
-import { AuthService } from './services/auth.service';
-import { ScraperService } from './services/scraper.service';
-import { QueueService } from './services/queue.service';
-import { CreateSessionDto } from './dto/create-session.dto';
-import { SendAssistanceDto } from './dto/send-assistance.dto';
-import { Session } from './interfaces/session.interface';
+import { Controller, Post, Body, HttpStatus, HttpException, Logger } from '@nestjs/common';
 
-@Controller('whatsapp')
+import { SendAssistanceDto } from './dto/send-assistance.dto';
+import { WhatsappService } from './whatsapp.service';
+
+@Controller('wapp-web')
 export class WhatsappController {
   private readonly logger = new Logger(WhatsappController.name);
-  
-  constructor(
-    private readonly sessionManager: SessionManagerService,
-    private readonly authService: AuthService,
-    private readonly scraperService: ScraperService,
-    private readonly queueService: QueueService,
-  ) {}
 
-  @Post('sessions')
-  async createSession(@Body() createSessionDto: CreateSessionDto) {
-    const { name } = createSessionDto;
-    if (this.sessionManager.get(name)) {
-      throw new HttpException(`La sesión '${name}' ya existe.`, HttpStatus.CONFLICT);
+  constructor(private readonly whatsappService: WhatsappService) {}
+
+  @Post('senddReport')
+  async sendReport(@Body() reportData: SendAssistanceDto) {
+    if (!this.whatsappService.isReady()) {
+      throw new HttpException(
+        'El servicio de WhatsApp no está listo. Por favor, inténtelo más tarde.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
 
+    this.logger.log(`Recibida solicitud de reporte para: ${reportData.student}`);
     try {
-      const { page, isAuthenticated } = await this.authService.createSessionAndGoToWhatsApp(name);
-
-      const session: Session = { 
-        name, 
-        page, 
-        isAuthenticated,
-        profilePath: '' 
-      };
-      this.sessionManager.set(session);
-
-      if (isAuthenticated) {
-        return { 
-          message: `Sesión '${name}' recuperada con éxito. Ya estás autenticado.`, 
-          isAuthenticated: true, 
-          qrCode: null 
-        };
-      }
-
-      try {
-        const qrCode = await this.authService.getQrCode(page);
-        session.qrCode = qrCode;
-        
-        this.authService.waitForAuthentication(page).then(() => {
-          this.sessionManager.setAuthenticated(name);
-        }).catch(err => {
-          this.logger.warn(`La autenticación para ${name} falló o expiró: ${err.message}`);
-        });
-        
-        return { 
-          message: `Sesión '${name}' creada. Escanea el QR.`, 
-          isAuthenticated: false, 
-          qrCode 
-        };
-      } catch (error) {
-        this.sessionManager.remove(name);
-        throw new HttpException({ message: error.message }, HttpStatus.INTERNAL_SERVER_ERROR);
-      }
-    } catch (error) {
-      throw new HttpException({ message: error.message }, HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-  }
-
-  @Get('sessions')
-  async listSessions() {
-    const sessions = this.sessionManager.getAll();
-    return {
-      total: sessions.length,
-      sessions: sessions.map(s => ({
-        name: s.name,
-        isAuthenticated: s.isAuthenticated,
-        hasQR: !!s.qrCode
-      }))
-    };
-  }
-
-  @Get('sessions/:name/qr')
-  async getQr(@Param('name') name: string) {
-    const session = this.sessionManager.get(name);
-    if (!session) throw new HttpException('Sesión no encontrada.', HttpStatus.NOT_FOUND);
-    
-    if (session.isAuthenticated) {
-      return { message: 'Sesión ya autenticada.', isAuthenticated: true, qrCode: null };
-    }
-    
-    return { message: 'Esperando autenticación.', isAuthenticated: false, qrCode: session.qrCode };
-  }
-
-  @Get('sessions/:name/status')
-  async getSessionStatus(@Param('name') name: string) {
-    const session = this.sessionManager.get(name);
-    if (!session) {
-      throw new HttpException('Sesión no encontrada.', HttpStatus.NOT_FOUND);
-    }
-    
-    return {
-      name: session.name,
-      isAuthenticated: session.isAuthenticated,
-      hasQR: !!session.qrCode
-    };
-  }
-
-  @Post('sessions/:name/send-assistance-report')
-  async sendReport(@Param('name') name: string, @Body() reportData: SendAssistanceDto) {
-    const session = this.sessionManager.get(name);
-    if (!session || !session.isAuthenticated) {
-      throw new HttpException('Sesión no encontrada o no autenticada.', HttpStatus.BAD_REQUEST);
-    }
-    
-    const queueId = await this.scraperService.sendAssistanceReport(reportData, name);
-    
-    return { 
-      success: true, 
-      message: 'Mensaje agregado a la cola de Redis',
-      queueId 
-    };
-  }
-  
-  // ✅ ENDPOINTS DE COLA
-  @Get('queues')
-  async getAllQueuesStatus() {
-    return this.queueService.getAllQueuesStatus();
-  }
-
-  @Get('queues/:name')
-  async getQueueStatus(@Param('name') name: string) {
-    return this.queueService.getQueueStatus(name);
-  }
-
-  @Delete('queues/:name')
-  async clearQueue(@Param('name') name: string) {
-    await this.queueService.clearQueue(name);
-    return { message: `Cola '${name}' limpiada` };
-  }
-
-  @Get('queues/:name/errors')
-  async getQueueErrors(@Param('name') name: string) {
-    const errors = await this.queueService.getErrors(name);
-    return {
-      sessionName: name,
-      totalErrors: errors.length,
-      errors
-    };
-  }
-
-  @Post('sessions/:name/logout')
-  async logout(@Param('name') name: string) {
-    await this.authService.closeBrowserForSession(name);
-    this.sessionManager.remove(name);
-    await this.queueService.clearQueue(name);
-    return { message: `Sesión '${name}' cerrada y cola limpiada.` };
-  }
-
-  // 📸 Endpoint: Captura de pantalla del navegador Puppeteer para una sesión
-  @Get('sessions/:name/screenshot')
-  async getSessionScreenshot(@Param('name') name: string, @Res() res: Response) {
-    const session = this.sessionManager.get(name);
-    if (!session) {
-      throw new HttpException('Sesión no encontrada.', HttpStatus.NOT_FOUND);
-    }
-
-    if (!session.page) {
-      throw new HttpException('Sesión sin página activa.', HttpStatus.BAD_REQUEST);
-    }
-
-    try {
-      // Tomar screenshot (no fullPage por defecto, puedes ajustar)
-      const buffer = await session.page.screenshot({ type: 'png', fullPage: false });
-      res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      return res.send(buffer);
-    } catch (error) {
-      this.logger.error(`Error generando screenshot para ${name}: ${error.message}`);
-      throw new HttpException('No se pudo generar screenshot.', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-  }
-
-  // ✅ ENDPOINT DE DEBUG: Procesar la cola manualmente
-  @Post('debug/process-queue')
-  async debugProcessQueue() {
-    this.logger.log('🔧 [DEBUG] Procesando colas manualmente...');
-    
-    // Forzar procesamiento de colas
-    try {
-      // Acceder al método privado mediante reflexión (no es ideal pero funciona)
-      const result = await this.queueService['processAllQueues']();
-      
+      const result = await this.whatsappService.sendAssistanceReport(reportData);
       return {
-        success: true,
-        message: '✅ Colas procesadas manualmente',
-        result
+        statusCode: HttpStatus.OK,
+        message: 'Reporte procesado con éxito.',
+        data: result,
       };
     } catch (error) {
-      return {
-        success: false,
-        message: '❌ Error al procesar colas',
-        error: error.message
-      };
+      this.handleError(error);
     }
   }
 
-  // ✅ ENDPOINT DE DEBUG: Ver estado de Redis
-  @Get('debug/queue-status-detailed')
-  async debugQueueStatus() {
-    const status = await this.queueService.getAllQueuesStatus();
-    return {
-      success: true,
-      timestamp: new Date(),
-      queues: status
-    };
+  private handleError(error: any) {
+    const message = error instanceof Error ? error.message : 'Error desconocido';
+    this.logger.error(`Error en el controlador: ${message}`);
+    throw new HttpException(
+      {
+        status: HttpStatus.INTERNAL_SERVER_ERROR,
+        error: 'No se pudo enviar el reporte de asistencia.',
+        details: message,
+      },
+      HttpStatus.INTERNAL_SERVER_ERROR,
+    );
   }
 }

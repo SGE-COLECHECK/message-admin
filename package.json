@@ -1,7 +1,7 @@
 {
   "name": "message-admin",
   "version": "0.0.1",
-  "description": "",
+  "description": "rm -rf /root/message-admin/profiles/ieguillermo/SingletonLock rm -rf /root/message-admin/profiles/ieindependencia/SingletonLock rm -rf /root/message-admin/profiles/ieguillermo/SingletonSocket rm -rf /root/message-admin/profiles/ieindependencia/SingletonSocket",
   "author": "",
   "private": true,
   "license": "UNLICENSED",
@@ -28,6 +28,7 @@
     "class-validator": "^0.14.2",
     "ioredis": "^5.8.2",
     "puppeteer": "^24.27.0",
+    "puppeteer-core": "^24.30.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
@@ -75,5 +76,10 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
-  }
+  },
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "keywords": []
 }
