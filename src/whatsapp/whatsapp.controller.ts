@@ -1,26 +1,34 @@
-import { Controller, Post, Body, HttpStatus, HttpException, Logger } from '@nestjs/common';
+import { Controller, Post, Body, HttpStatus, HttpException, Logger, Param } from '@nestjs/common';
 
 import { SendAssistanceDto } from './dto/send-assistance.dto';
-import { WhatsappService } from './whatsapp.service';
+import { WhatsappAccountManager } from './whatsapp-account.manager';
 
 @Controller('wapp-web')
 export class WhatsappController {
   private readonly logger = new Logger(WhatsappController.name);
 
-  constructor(private readonly whatsappService: WhatsappService) {}
+  constructor(private readonly accountManager: WhatsappAccountManager) {}
 
-  @Post('senddReport')
-  async sendReport(@Body() reportData: SendAssistanceDto) {
-    if (!this.whatsappService.isReady()) {
+  @Post(':accountId/senddReport')
+  async sendReport(
+    @Param('accountId') accountId: string,
+    @Body() reportData: SendAssistanceDto,
+  ) {
+    const whatsappService = this.accountManager.getAccount(accountId);
+    if (!whatsappService) {
+      throw new HttpException(`La cuenta '${accountId}' no existe o no está configurada.`, HttpStatus.NOT_FOUND);
+    }
+
+    if (!whatsappService.isReady()) {
       throw new HttpException(
-        'El servicio de WhatsApp no está listo. Por favor, inténtelo más tarde.',
+        `El servicio de WhatsApp para la cuenta '${accountId}' no está listo. Por favor, inténtelo más tarde.`,
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
 
     this.logger.log(`Recibida solicitud de reporte para: ${reportData.student}`);
     try {
-      const result = await this.whatsappService.sendAssistanceReport(reportData);
+      const result = await whatsappService.sendAssistanceReport(reportData);
       return {
         statusCode: HttpStatus.OK,
         message: 'Reporte procesado con éxito.',

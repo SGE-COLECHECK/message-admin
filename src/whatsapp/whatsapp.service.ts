@@ -6,7 +6,7 @@ import { SendAssistanceDto } from './dto/send-assistance.dto';
 
 @Injectable()
 export class WhatsappService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(WhatsappService.name);
+  private readonly logger: Logger;
   private browser: Browser | null = null;
   private page: Page | null = null;
   private isConnecting = false;
@@ -19,7 +19,9 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     MESSAGE_BOX: 'div[contenteditable="true"][data-tab="10"]',
   };
 
-  constructor(private configService: ConfigService) {}
+  constructor(private configService: ConfigService, private accountId: string = 'default') {
+    this.logger = new Logger(`${WhatsappService.name} [${this.accountId}]`);
+  }
 
   async onModuleInit() {
     // La lógica de conexión se maneja aquí para que el servicio esté listo al iniciar
