@@ -205,6 +205,24 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         return text.includes('No se encontró el chat') || text.includes('Invitar a WhatsApp') || text.includes('No chat found') || text.includes('Invite to WhatsApp');
       });
 
+      // --- INICIO: Validación de seguridad crítica ---
+      // Verifica que el chat abierto corresponde al número buscado.
+      // Esto evita enviar un mensaje al chat anterior si el número no se encuentra.
+      const chatHeaderTitle = await this.page.evaluate(() => {
+        const header = document.querySelector('header [data-testid="conversation-header"]');
+        const titleElement = header?.querySelector('span[dir="auto"]');
+        return titleElement?.getAttribute('title')?.replace(/[\s\-\+]/g, '');
+      });
+
+      if (!chatHeaderTitle || !chatHeaderTitle.includes(formattedPhone)) {
+        this.logger.error(`¡ERROR DE SEGURIDAD! El chat abierto (${chatHeaderTitle}) no coincide con el número buscado (${formattedPhone}). Abortando envío.`);
+        const backButton = await this.page.$('button[aria-label="Atrás"], button[aria-label="Back"]');
+        if (backButton) await backButton.click();
+        throw new Error(`El número ${formattedPhone} no se encontró o no se pudo abrir el chat correcto.`);
+      }
+      this.logger.log(`✅ Verificación de chat correcta. Chat abierto: ${chatHeaderTitle}`);
+      // --- FIN: Validación de seguridad crítica ---
+
       if (noWhatsAppFound) {
         // --- INICIO: Lógica de seguridad para evitar envío a contacto incorrecto ---
         this.logger.warn(`El número ${formattedPhone} no tiene WhatsApp. Limpiando búsqueda...`);
