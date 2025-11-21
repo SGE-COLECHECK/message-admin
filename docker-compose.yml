@@ -26,6 +26,9 @@ services:
       - PUPPETEER_WAIT_FOR_UI_TIMEOUT=5000
       - PUPPETEER_TYPING_DELAY=50
       - PUPPETEER_AFTER_CLICK_DELAY=150
+
+      # Puppeteer host para conectar desde Docker (en WSL) a un navegador en Windows
+      - PUPPETEER_BROWSER_HOST=host.docker.internal
       
       # Feature Flags
       - USE_QUEUE=true
