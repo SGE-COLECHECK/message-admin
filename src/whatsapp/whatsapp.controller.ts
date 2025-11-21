@@ -39,6 +39,38 @@ export class WhatsappController {
     }
   }
 
+  @Post(':accountId/class-attendance-report')
+  async sendClassAttendanceReport(
+    @Param('accountId') accountId: string,
+    @Body() body: any, // RECOMENDACIÓN: Crear un DTO (p.ej. ClassAttendanceReportDto) para validar el body
+  ) {
+    const whatsappService = this.accountManager.getAccount(accountId);
+    if (!whatsappService) {
+      throw new HttpException(`La cuenta '${accountId}' no existe o no está configurada.`, HttpStatus.NOT_FOUND);
+    }
+
+    if (!whatsappService.isReady()) {
+      throw new HttpException(
+        `El servicio de WhatsApp para la cuenta '${accountId}' no está listo. Por favor, inténtelo más tarde.`,
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+
+    this.logger.log(`Recibida solicitud de reporte de asistencia por clase para la cuenta '${accountId}'.`);
+    try {
+      // Llama al nuevo método en el servicio
+      const result = await whatsappService.sendClassAttendanceReport(body);
+      return {
+        statusCode: HttpStatus.OK,
+        message: 'Reporte de asistencia por clase procesado con éxito.',
+        data: result,
+      };
+    } catch (error) {
+      // Reutiliza el manejador de errores existente
+      this.handleError(error);
+    }
+  }
+
   private handleError(error: any) {
     const message = error instanceof Error ? error.message : 'Error desconocido';
     this.logger.error(`Error en el controlador: ${message}`);

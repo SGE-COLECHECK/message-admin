@@ -64,7 +64,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       this.logger.error(`❌ No se pudo conectar a ${browserType}.`);
       this.logger.error(`   Asegúrate de que ${browserType} esté abierto con --remote-debugging-port=${debugPort}`);
-      
+
       let exampleCommand = 'google-chrome'; // Default para Chrome en Linux
       if (browserType?.toLowerCase() === 'edge') {
         if (platform === 'win32') exampleCommand = 'msedge.exe';
@@ -98,7 +98,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       const pages = await this.browser.pages();
       const whatsappUrl = this.configService.get<string>('WHATSAPP_URL', 'https://web.whatsapp.com/');
       this.page = pages.find(p => p.url().startsWith(whatsappUrl)) || await this.browser.newPage();
-      
+
       if (!this.page.url().startsWith(whatsappUrl)) {
         this.logger.log(`No se encontró página de WhatsApp. Navegando a ${whatsappUrl}...`);
         await this.page.goto(whatsappUrl, { waitUntil: 'networkidle2' });
@@ -112,7 +112,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         await this.page.setViewport({ width, height });
         this.logger.log(`📐 Viewport ajustado a ${width}x${height}.`);
       }
-      
+
       this.logger.log('🔍 Verificando sesión de WhatsApp...');
       try {
         await this.page.waitForSelector(this.SELECTORS.SEARCH_BOX, { timeout: 10000 });
@@ -177,6 +177,62 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     return `${header}\n${separator}\n${studentLine}\n${timeLine}\n${separator}\n${footer}`;
   }
 
+  // TODO: Considerar crear un DTO para el body para mayor seguridad de tipos.
+  private generateClassAttendanceReportMessage(body: any): string {
+    const { colegio, nivel, reporte } = body;
+    // Usar toLocaleDateString puede ser dependiente de la zona horaria del servidor.
+    // Si se necesita un formato consistente, se podría usar la función formatDate existente.
+    const today = new Date().toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    // Íconos y colores fijos por grado
+    // SUGERENCIA: Usar mapas para una asignación más precisa por nombre de grado
+    const gradoIconMap: { [key: string]: string } = {
+      "Cero": "0️⃣",
+      "Primero": "1️⃣",
+      "Segundo": "2️⃣",
+      "Tercero": "3️⃣",
+      "Cuarto": "4️⃣",
+      "Quinto": "5️⃣",
+      "Sexto": "6️⃣",
+    };
+    const gradoColorMap: { [key: string]: string } = {
+      "Cero": "⚪", "Primero": "🟡", "Segundo": "🟢", "Tercero": "🔵",
+      "Cuarto": "🟠", "Quinto": "🔴", "Sexto": "🟣",
+    };
+
+    let message = `🚨🇨​​​​​🇴​​​​​🇱​​​​​🇪✅ *[${today}]* 🚨\n\n`;
+    message += `📝 *Reporte Preliminar de Asistencia*\n`;
+    message += `⏰ *Hasta las 8:15 a.m.*\n\n`;
+    message += `🏫 *${colegio}*\n`;
+    message += `📚 *Nivel:* ${nivel.charAt(0).toUpperCase() + nivel.slice(1)}\n\n`;
+    message += `📊 *Asistencia por Clase (Previo a Formación)*\n`;
+    message += `\n➖➖➖➖➖➖➖➖➖➖\n`;
+
+    for (const [grado, secciones] of Object.entries(reporte)) {
+      const icon = gradoIconMap[grado] || "🔢"; // Icono por defecto si no se encuentra
+      const color = gradoColorMap[grado] || "⚫"; // Color por defecto si no se encuentra
+
+      // El objeto 'secciones' puede tener múltiples entradas, iteramos sobre ellas.
+      for (const [seccion, datos] of Object.entries(secciones as object)) {
+        const { asistencia, total } = datos as { asistencia: number; total: number };
+        if (total > 0) {
+          const percent = Math.round((asistencia / total) * 100);
+          const bar = '█'.repeat(Math.round(percent / 10)) + '░'.repeat(10 - Math.round(percent / 10));
+          // Números de dos dígitos para consistencia visual
+          const asistenciaStr = String(asistencia).padStart(2, '0');
+          const totalStr = String(total).padStart(2, '0');
+          message += `${color} ${icon}${seccion} *${asistenciaStr}* / *${totalStr}* ${bar} ${percent}%\n`;
+        }
+      }
+    }
+
+    message += `\n⚠️ *Este es un reporte preliminar, no el consolidado final.*\n`;
+    message += `✅ *Gracias por su gestión!*`;
+
+    return message;
+  }
+
+
   private async sendMessage(phoneNumber: string, message: string): Promise<void> {
     if (!this.page) {
       this.logger.error('❌ La página de WhatsApp no está inicializada. No se puede enviar el mensaje.');
@@ -189,9 +245,19 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       formattedPhone = countryCode + formattedPhone;
     }
 
+    // 🚫 **PROTECCIÓN: No enviar mensajes al número de prueba**
+    const blockedNumbers = ['963828458', '51963828458'];
+    const plainPhone = formattedPhone.replace(countryCode, '');
+
+    if (blockedNumbers.includes(plainPhone) || blockedNumbers.includes(formattedPhone)) {
+      this.logger.warn(`⚠ El número ${formattedPhone} está bloqueado (número de prueba). No se enviará el mensaje.`);
+      throw new Error(`El número ${formattedPhone} está bloqueado y no recibe mensajes.`);
+    }
+    // ----------------------------------------------------------
+
     try {
       this.logger.log(`🚀 Enviando mensaje a ${formattedPhone}...`);
-      
+
       const searchBox = await this.page.waitForSelector(this.SELECTORS.SEARCH_BOX, { timeout: 15000 });
       if (!searchBox) throw new Error('No se encontró el cuadro de búsqueda.');
       await searchBox.click({ clickCount: 3 });
@@ -206,47 +272,38 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       });
 
       if (noWhatsAppFound) {
-        // --- INICIO: Lógica de seguridad para evitar envío a contacto incorrecto ---
         this.logger.warn(`El número ${formattedPhone} no tiene WhatsApp. Limpiando búsqueda...`);
-        // Busca y hace clic en el botón "Atrás" para salir de la pantalla de "no encontrado"
         const backButton = await this.page.$('button[aria-label="Atrás"], button[aria-label="Back"]');
         if (backButton) {
           await backButton.click();
         }
-        // --- FIN: Lógica de seguridad ---
         throw new Error(`El número ${formattedPhone} no tiene WhatsApp.`);
       }
 
       const messageBox = await this.page.waitForSelector(this.SELECTORS.MESSAGE_BOX, { timeout: 5000 });
-      
+
       if (!messageBox) throw new Error('No se encontró el cuadro de mensaje.');
       await messageBox.click();
       await new Promise(resolve => setTimeout(resolve, 200));
 
-      // --- INICIO: Revertido a escritura rápida y fiable ---
       const lines = message.split('\n');
       for (let i = 0; i < lines.length; i++) {
-        // Se reduce el delay a 10ms para una escritura muy rápida pero que sigue siendo "humana"
         await this.page.keyboard.type(lines[i], { delay: 10 });
         if (i < lines.length - 1) {
-          // Simula Shift+Enter para un salto de línea en WhatsApp
           await this.page.keyboard.down('Shift');
           await this.page.keyboard.press('Enter');
           await this.page.keyboard.up('Shift');
-          // Pequeña pausa para asegurar que el salto de línea se procese
           await new Promise(resolve => setTimeout(resolve, 20));
         }
       }
-      // --- FIN: Revertido a escritura rápida y fiable ---
-      
+
       const randomDelay = Math.random() * 2000 + 1000;
       await new Promise(resolve => setTimeout(resolve, randomDelay));
       await this.page.keyboard.press('Enter');
-      
+
       this.logger.log(`✅ Mensaje enviado a ${formattedPhone} con éxito.`);
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // Log de uso de memoria
       if (this.page) {
         const metrics = await this.page.metrics();
         this.logger.log(`📊 Uso de memoria (JS Heap): ${((metrics.JSHeapTotalSize ?? 0) / 1024 / 1024).toFixed(2)} MB`);
@@ -261,6 +318,9 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       throw new Error(`Fallo al enviar mensaje a ${formattedPhone}: ${errorMessage}`);
     }
   }
+
+
+
 
   private async processQueue(): Promise<void> {
     if (this.isProcessingQueue) {
@@ -296,15 +356,50 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     if (!this.isReady()) {
       throw new Error('El servicio de WhatsApp no está listo. No se puede encolar el mensaje.');
     }
-    
+
+    // --- INICIO: Lógica para sobreescribir número en modo de prueba ---
+    const overridePhoneNumber = this.configService.get<string>('OVERRIDE_PHONE_NUMBER');
+    const finalPhoneNumber = overridePhoneNumber || reportData.phoneNumber;
+    if (overridePhoneNumber) {
+      this.logger.warn(`📞 [PRUEBA] Se está sobreescribiendo el número de destino. Original: ${reportData.phoneNumber}, Nuevo: ${finalPhoneNumber}`);
+    }
+    // --- FIN: Lógica para sobreescribir número ---
+
     const message = this.generateAssistanceMessage(reportData);
-    this.messageQueue.push({ phoneNumber: reportData.phoneNumber, message });
+    this.messageQueue.push({ phoneNumber: finalPhoneNumber, message });
     this.logger.log(`📥 Mensaje para ${reportData.student} añadido a la cola. Total en cola: ${this.messageQueue.length}`);
+
 
     // Dispara el procesador de la cola (no se espera a que termine)
     this.processQueue();
 
     return `Reporte para ${reportData.student} ha sido encolado.`;
+  }
+
+  public async sendClassAttendanceReport(body: any): Promise<string> {
+    if (!this.isReady()) {
+      throw new Error('El servicio de WhatsApp no está listo. No se puede encolar el mensaje.');
+    }
+
+    const { destinatario } = body;
+    if (!destinatario || !destinatario.telefono) {
+      throw new Error('El cuerpo de la petición no contiene un destinatario con teléfono.');
+    }
+
+    // --- INICIO: Lógica para sobreescribir número en modo de prueba ---
+    const overridePhoneNumber = this.configService.get<string>('OVERRIDE_PHONE_NUMBER');
+    const finalPhoneNumber = overridePhoneNumber || destinatario.telefono;
+    if (overridePhoneNumber) {
+      this.logger.warn(`📞 [PRUEBA] Se está sobreescribiendo el número de destino. Original: ${destinatario.telefono}, Nuevo: ${finalPhoneNumber}`);
+    }
+    // --- FIN: Lógica para sobreescribir número ---
+
+    const message = this.generateClassAttendanceReportMessage(body);
+    this.messageQueue.push({ phoneNumber: finalPhoneNumber, message });
+    this.logger.log(`📥 Reporte de asistencia de clase añadido a la cola. Total en cola: ${this.messageQueue.length}`);
+
+    this.processQueue(); // Dispara el procesador sin esperar
+    return `Reporte de asistencia de clase ha sido encolado para su envío.`;
   }
 
   public isReady(): boolean {
