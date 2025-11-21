@@ -1,11 +1,10 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import puppeteer, { Browser, Page } from 'puppeteer-core';
-import { platform } from 'process';
 import { SendAssistanceDto } from './dto/send-assistance.dto';
 
 @Injectable()
-export class WhatsappService implements OnModuleInit, OnModuleDestroy {
+export class WhatsappService implements OnModuleDestroy {
   private readonly logger: Logger;
   private browser: Browser | null = null;
   private page: Page | null = null;
@@ -19,13 +18,12 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     MESSAGE_BOX: 'div[contenteditable="true"][data-tab="10"]',
   };
 
-  constructor(private configService: ConfigService, private accountId: string = 'default') {
+  constructor(
+    private configService: ConfigService,
+    private accountId: string,
+    private accountDescription: string,
+  ) {
     this.logger = new Logger(`${WhatsappService.name} [${this.accountId}]`);
-  }
-
-  async onModuleInit() {
-    // La lógica de conexión se maneja aquí para que el servicio esté listo al iniciar
-    await this.connectBrowser();
   }
 
   async onModuleDestroy() {
@@ -35,62 +33,42 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async connectBrowser(): Promise<void> {
+  async initialize(port: number, browserHost: string): Promise<void> {
     if (this.isConnecting) {
       this.logger.log('Ya hay una conexión en progreso. Esperando...');
-      // Podríamos implementar una espera más sofisticada si es necesario
       return;
     }
     this.isConnecting = true;
 
-    const debugPort = this.configService.get<string>('WHATSAPP_DEBUG_PORT');
-    const browserType = this.configService.get<string>('WHATSAPP_BROWSER_TYPE');
-    const browserWSEndpointFromConfig = this.configService.get<string>('WHATSAPP_WS_ENDPOINT');
-    const isHeadless = this.configService.get<boolean>('WHATSAPP_HEADLESS_MODE', false);
-
-    this.logger.log(`Modo Headless esperado: ${isHeadless}`);
-    if (isHeadless) this.logger.warn('Asegúrate de haber iniciado el navegador en modo headless.');
-
-    this.logger.log(`🎬 Intentando conectar con ${browserType} en el puerto ${debugPort}...`);
+    this.logger.log(`🎬 Intentando conectar con ${browserHost} en el puerto ${port}...`);
 
     let browserWSEndpoint: string;
     try {
-      const response = await fetch(`http://localhost:${debugPort}/json/version`);
+      // Usamos el host y puerto proporcionados
+      const response = await fetch(`http://${browserHost}:${port}/json/version`);
       if (!response.ok) {
         throw new Error(`No se pudo conectar al puerto de depuración. Estado: ${response.status}`);
       }
       const data = await response.json();
       browserWSEndpoint = data.webSocketDebuggerUrl;
     } catch (error) {
-      this.logger.error(`❌ No se pudo conectar a ${browserType}.`);
-      this.logger.error(`   Asegúrate de que ${browserType} esté abierto con --remote-debugging-port=${debugPort}`);
-
-      let exampleCommand = 'google-chrome'; // Default para Chrome en Linux
-      if (browserType?.toLowerCase() === 'edge') {
-        if (platform === 'win32') exampleCommand = 'msedge.exe';
-        else if (platform === 'darwin') exampleCommand = '/Applications/Microsoft\\ Edge.app/Contents/MacOS/Microsoft\\ Edge'; // macOS
-        else exampleCommand = 'microsoft-edge'; // Linux
-      }
-
-      this.logger.error(`   Ejemplo: ${exampleCommand} --remote-debugging-port=${debugPort}`);
-
+      this.logger.error(`❌ No se pudo conectar a ${browserHost} en el puerto ${port}.`);
+      this.logger.error(`   Asegúrate de que el navegador esté abierto con --remote-debugging-port=${port} y --remote-debugging-address=0.0.0.0`);
       this.isConnecting = false;
       return;
     }
 
     try {
-      this.browser = await puppeteer.connect({ browserWSEndpoint: browserWSEndpointFromConfig || browserWSEndpoint });
-      this.logger.log(`✅ Conectado al navegador ${browserType}.`);
+      this.browser = await puppeteer.connect({ browserWSEndpoint });
+      this.logger.log(`✅ Conectado al navegador en ${browserHost}:${port}.`);
 
       // --- INICIO: Lógica mejorada para identificar la cuenta y cargar WhatsApp ---
-      const accountDescription = this.configService.get<string>('description', this.accountId);
-
       // 1. Abrir una página de bienvenida para identificar la ventana del navegador.
       const welcomePage = await this.browser.newPage();
       await welcomePage.setContent(`
-        <html style="background-color: #2c3e50; color: #ecf0f1; display: flex; justify-content: center; align-items: center; height: 100%; font-family: sans-serif;">
-          <head><title>${accountDescription}</title></head>
-          <body><h1>Conectando a: ${accountDescription}</h1></body>
+        <html style="background-color: #2c3e50; color: #ecf0f1; display: flex; justify-content: center; align-items: center; height: 100%; font-family: sans-serif; text-align: center;">
+          <head><title>${this.accountDescription}</title></head>
+          <body><h1>Conectado a:<br/>${this.accountDescription}</h1></body>
         </html>
       `);
 
