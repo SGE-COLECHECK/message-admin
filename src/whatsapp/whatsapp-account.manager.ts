@@ -21,6 +21,14 @@ export class WhatsappAccountManager implements OnModuleInit {
       return;
     }
 
+    if (!accountConfigs || accountConfigs.length === 0) {
+      this.logger.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+      this.logger.error('!!! ERROR: No se encontró configuración de cuentas de WhatsApp (whatsappAccounts).');
+      this.logger.error('!!! Revisa tu archivo whatsapp-accounts.config.ts.');
+      this.logger.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+      return;
+    }
+
     this.logger.log(`Inicializando ${accountConfigs.length} cuenta(s) de WhatsApp...`);
     this.logger.log(`Usando host del navegador: ${browserHost}`);
 
