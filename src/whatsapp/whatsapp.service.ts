@@ -158,58 +158,56 @@ export class WhatsappService implements OnModuleDestroy {
   // TODO: Considerar crear un DTO para el body para mayor seguridad de tipos.
   private generateClassAttendanceReportMessage(body: any): string {
     const { colegio, nivel, reporte } = body;
-    // Usar toLocaleDateString puede ser dependiente de la zona horaria del servidor.
-    // Si se necesita un formato consistente, se podría usar la función formatDate existente.
     const today = new Date().toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
-    // Íconos y colores fijos por grado
-    // SUGERENCIA: Usar mapas para una asignación más precisa por nombre de grado
-    const gradoIconMap: { [key: string]: string } = {
-      "Cero": "0️⃣",
-      "Primero": "1️⃣",
-      "Segundo": "2️⃣",
-      "Tercero": "3️⃣",
-      "Cuarto": "4️⃣",
-      "Quinto": "5️⃣",
-      "Sexto": "6️⃣",
-    };
-    const gradoColorMap: { [key: string]: string } = {
-      "Cero": "⚪", "Primero": "🟡", "Segundo": "🟢", "Tercero": "🔵",
-      "Cuarto": "🟠", "Quinto": "🔴", "Sexto": "🟣",
+    // Mapeo de Grados a Íconos y Colores para asegurar consistencia
+    const gradoMap: { [key: string]: { icon: string; color: string } } = {
+      // Primaria y Secundaria (maneja mayúsculas/minúsculas)
+      'primero': { icon: '1️⃣', color: '🟡' },
+      'segundo': { icon: '2️⃣', color: '🟢' },
+      'tercero': { icon: '3️⃣', color: '🔵' },
+      'cuarto': { icon: '4️⃣', color: '🟠' },
+      'quinto': { icon: '5️⃣', color: '🔴' },
+      'sexto': { icon: '6️⃣', color: '🟣' },
+      // Nivel Inicial
+      '3 años': { icon: '3️⃣', color: '🌸' },
+      '4 años': { icon: '4️⃣', color: '🌼' },
+      '5 años': { icon: '5️⃣', color: '🌻' },
     };
 
     let message = `🚨🇨​​​​​🇴​​​​​🇱​​​​​🇪✅ *[${today}]* 🚨\n\n`;
     message += `📝 *Reporte Preliminar de Asistencia*\n`;
-    message += `⏰ *Hasta las 8:15 a.m.*\n\n`;
+    message += `⏰ *Hasta las 8:30 a.m.*\n\n`;
     message += `🏫 *${colegio}*\n`;
-    message += `📚 *Nivel:* ${nivel.charAt(0).toUpperCase() + nivel.slice(1)}\n\n`;
-    message += `📊 *Asistencia por Clase (Previo a Formación)*\n`;
+    // Aseguramos que 'nivel' exista antes de usarlo
+    if (nivel) {
+      message += `📚 *Nivel:* ${nivel.charAt(0).toUpperCase() + nivel.slice(1)}\n\n`;
+    }
+    message += `📊 *Asistencia por Clase *\n`;
     message += `\n➖➖➖➖➖➖➖➖➖➖\n`;
 
     for (const [grado, secciones] of Object.entries(reporte)) {
-      const icon = gradoIconMap[grado] || "🔢"; // Icono por defecto si no se encuentra
-      const color = gradoColorMap[grado] || "⚫"; // Color por defecto si no se encuentra
+      // Normalizamos el nombre del grado (a minúsculas) para buscar en el mapa
+      const gradoKey = grado.toLowerCase();
+      const { icon, color } = gradoMap[gradoKey] || { icon: '🔢', color: '⚪' }; // Valores por defecto si no se encuentra
 
-      // El objeto 'secciones' puede tener múltiples entradas, iteramos sobre ellas.
-      for (const [seccion, datos] of Object.entries(secciones as object)) {
-        const { asistencia, total } = datos as { asistencia: number; total: number };
+      for (const [seccion, datos] of Object.entries(secciones as any)) {
+        const { asistencia, total } = datos as any;
         if (total > 0) {
           const percent = Math.round((asistencia / total) * 100);
           const bar = '█'.repeat(Math.round(percent / 10)) + '░'.repeat(10 - Math.round(percent / 10));
           // Números de dos dígitos para consistencia visual
           const asistenciaStr = String(asistencia).padStart(2, '0');
           const totalStr = String(total).padStart(2, '0');
-          message += `${color} ${icon}${seccion} *${asistenciaStr}* / *${totalStr}* ${bar} ${percent}%\n`;
+          message += `${color} ${icon} ${seccion} *${asistenciaStr}* / *${totalStr}* ${bar} ${percent}%\n`;
         }
       }
     }
 
-    message += `\n⚠️ *Este es un reporte preliminar, no el consolidado final.*\n`;
     message += `✅ *Gracias por su gestión!*`;
 
     return message;
   }
-
 
   private async sendMessage(phoneNumber: string, message: string): Promise<void> {
     if (!this.page) {
@@ -372,7 +370,10 @@ export class WhatsappService implements OnModuleDestroy {
     }
     // --- FIN: Lógica para sobreescribir número ---
 
-    const message = this.generateClassAttendanceReportMessage(body);
+    // Si el body ya trae un mensaje pre-generado (como en el caso de 'ping'), úsalo.
+    // De lo contrario, genera el mensaje de reporte de asistencia.
+    const message = body.message || this.generateClassAttendanceReportMessage(body);
+
     this.messageQueue.push({ phoneNumber: finalPhoneNumber, message });
     this.logger.log(`📥 Reporte de asistencia de clase añadido a la cola. Total en cola: ${this.messageQueue.length}`);
 

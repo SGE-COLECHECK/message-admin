@@ -71,6 +71,40 @@ export class WhatsappController {
     }
   }
 
+  @Post(':accountId/ping-whatsapp')
+  async pingWhatsapp(
+    @Param('accountId') accountId: string,
+    @Body() body: { phoneNumber: string },
+  ) {
+    const whatsappService = this.accountManager.getAccount(accountId);
+    if (!whatsappService) {
+      throw new HttpException(`La cuenta '${accountId}' no existe o no está configurada.`, HttpStatus.NOT_FOUND);
+    }
+
+    if (!whatsappService.isReady()) {
+      throw new HttpException(
+        `El servicio de WhatsApp para la cuenta '${accountId}' no está listo. Por favor, inténtelo más tarde.`,
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+
+    const { phoneNumber } = body;
+    const now = new Date();
+    const message =
+      `✅ *Bot activo*\n\n` +
+      `📅 Fecha: *${now.toLocaleDateString('es-PE')}*\n` +
+      `⏰ Hora: *${now.toLocaleTimeString('es-PE')}*\n` +
+      `🤖 Sistema de notificaciones listo.`;
+
+    try {
+      // El método sendClassAttendanceReport es genérico y puede usarse aquí
+      await whatsappService.sendClassAttendanceReport({ destinatario: { telefono: phoneNumber }, message });
+      return { status: 'ok', sentTo: phoneNumber };
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+
   private handleError(error: any) {
     const message = error instanceof Error ? error.message : 'Error desconocido';
     this.logger.error(`Error en el controlador: ${message}`);
