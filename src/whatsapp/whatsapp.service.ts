@@ -277,6 +277,10 @@ export class WhatsappService implements OnModuleDestroy {
       await new Promise(resolve => setTimeout(resolve, randomDelay));
       await this.page.keyboard.press('Enter');
 
+      // Limpia la selección del chat actual para evitar envíos accidentales en la siguiente operación.
+      await this.page.keyboard.press('Escape');
+      this.logger.log('🧹 Selección de chat limpiada (Escape presionado).');
+
       this.logger.log(`✅ Mensaje enviado a ${formattedPhone} con éxito.`);
       await new Promise(resolve => setTimeout(resolve, 1000));
 
