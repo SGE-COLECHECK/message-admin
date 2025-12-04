@@ -444,10 +444,7 @@ npm run start:dev | grep "WhatsappService"
 
 ```bash
 # Validar JSON (Linux)
-cat browsers.config.json | jq .
-
-# Contar cuentas habilitadas
-cat browsers.config.json | jq '.accounts[] | select(.enabled == true)' | wc -l
+node -e "console.log(JSON.stringify(require('./browsers.config.json'), null, 2))"
 ```
 
 ---
