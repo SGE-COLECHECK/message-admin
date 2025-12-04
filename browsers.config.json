@@ -21,8 +21,7 @@
             "id": "iesanmartin",
             "description": "Colegio IE San Martin",
             "debuggingPort": 9224,
-            "enabled": false,
-            "comment": "Deshabilitado por defecto - cambiar enabled a true para activar"
+            "enabled": true
         }
     ]
 }
