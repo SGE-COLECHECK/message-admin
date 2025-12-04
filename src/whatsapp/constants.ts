@@ -1,0 +1,1 @@
+export const BLOCKED_NUMBERS = ['963828458', '51963828458'];
