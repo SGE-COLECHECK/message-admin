@@ -1,0 +1,28 @@
+{
+    "headless": false,
+    "browserExecutable": {
+        "linux": "microsoft-edge",
+        "windows": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+    },
+    "accounts": [
+        {
+            "id": "ieguillermo",
+            "description": "Colegio IE Guillermo",
+            "debuggingPort": 9222,
+            "enabled": true
+        },
+        {
+            "id": "ieindependencia",
+            "description": "Colegio IE Independencia",
+            "debuggingPort": 9223,
+            "enabled": true
+        },
+        {
+            "id": "iesanmartin",
+            "description": "Colegio IE San Martin",
+            "debuggingPort": 9224,
+            "enabled": false,
+            "comment": "Deshabilitado por defecto - cambiar enabled a true para activar"
+        }
+    ]
+}

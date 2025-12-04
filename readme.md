@@ -1,3 +1,62 @@
+# Message Admin - Sistema Multi-Navegador WhatsApp
+
+Sistema de administración de mensajes de WhatsApp con soporte para **múltiples cuentas dinámicas**.
+
+## 🚀 Nuevo: Sistema Dinámico Multi-Navegador
+
+Este proyecto ahora soporta **N navegadores** de forma dinámica. Puedes gestionar 2, 3, 4 o más cuentas de WhatsApp simultáneamente.
+
+### Características
+
+- ✅ **Configuración JSON centralizada** - Agrega cuentas sin modificar código
+- ✅ **Scripts cross-platform** - Linux (.sh) y Windows (.bat)
+- ✅ **Modo headless** - Ejecuta sin interfaz gráfica
+- ✅ **Auto-detección de navegadores** - Edge, Chrome, Chromium
+- ✅ **Habilitar/Deshabilitar cuentas** individualmente
+
+### Inicio Rápido
+
+1. **Configurar cuentas** en `browsers.config.json`:
+```json
+{
+  "headless": false,
+  "accounts": [
+    {
+      "id": "ieguillermo",
+      "description": "Colegio IE Guillermo",
+      "debuggingPort": 9222,
+      "enabled": true
+    },
+    {
+      "id": "ieindependencia",
+      "description": "Colegio IE Independencia",
+      "debuggingPort": 9223,
+      "enabled": true
+    }
+  ]
+}
+```
+
+2. **Lanzar navegadores**:
+```bash
+# Linux/macOS
+./start-browsers.sh
+
+# Windows
+start-browsers.bat
+```
+
+3. **Iniciar aplicación**:
+```bash
+npm run start:dev
+```
+
+📚 **[Ver Guía Completa](MULTI_BROWSER_GUIDE.md)** para más detalles sobre configuración, modo headless, y troubleshooting.
+
+---
+
+## 📋 Comandos de Mantenimiento
+
 # Eliminar los archivos de lock que Chrome crea
 rm -rf /root/message-admin/profiles/ieguillermo/SingletonLock
 rm -rf /root/message-admin/profiles/ieindependencia/SingletonLock
@@ -79,3 +138,4 @@ Este es un endpoint de ejemplo para obtener todos los mensajes.
     }
 ]
 ```
+
