@@ -7,7 +7,8 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++
 
 # Copia package files
-COPY package*.json ./# Instala TODAS las dependencias (incluye devDependencies)
+# Instala TODAS las dependencias (incluye devDependencies)
+COPY package*.json ./
 RUN npm ci --only=production && \
     # Copia también devDependencies para el build
     npm ci
@@ -63,6 +64,7 @@ RUN addgroup -g 1001 -S nodejs && \
     adduser -S pptruser -u 1001 -G nodejs && \
     chown -R pptruser:nodejs /app
 
-USER pptruserEXPOSE3000
+USER pptruser
+EXPOSE 3000
 
 CMD ["node", "dist/main.js"]
